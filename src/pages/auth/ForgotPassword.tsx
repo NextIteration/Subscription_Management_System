@@ -7,13 +7,19 @@ export const ForgotPassword: React.FC = () => {
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
   const { requestPasswordReset } = useAuth();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = requestPasswordReset(email);
-    setMessage(res.message);
-    setSubmitted(true);
+    setLoading(true);
+    try {
+      const res = await requestPasswordReset(email);
+      setMessage(res.message);
+      setSubmitted(true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

@@ -5,6 +5,18 @@ import { Modal } from '../../components/ui/Modal';
 import { useApp } from '../../context/AppContext';
 import { Subscription, SubscriptionStatus } from '../../types';
 import {
+  useSubscriptions,
+  useCreateSubscription,
+  useUpdateSubscriptionStatus,
+  usePauseSubscription,
+  useResumeSubscription,
+  useCloseSubscription,
+  useUpdateRenewal,
+} from '../../hooks/useSubscriptions';
+import { useCustomers } from '../../hooks/useCustomers';
+import { usePlans } from '../../hooks/usePlans';
+import { useProducts } from '../../hooks/useProducts';
+import {
   RefreshCw,
   Plus,
   Search,
@@ -22,18 +34,30 @@ import {
 } from 'lucide-react';
 
 export const SubscriptionList: React.FC = () => {
-  const {
-    subscriptions,
-    plans,
-    customers,
-    products,
-    addSubscription,
-    updateSubscriptionStatus,
-    pauseSubscription,
-    resumeSubscription,
-    closeSubscription,
-    updateSubscriptionRenewal,
-  } = useApp();
+  const { showToast } = useApp();
+  const { data: rawSubscriptions = [], isLoading } = useSubscriptions();
+  const { data: customerData } = useCustomers();
+  const customers = customerData?.data || [];
+  const { data: rawPlans = [] } = usePlans();
+  const { data: products = [] } = useProducts();
+
+  // Normalize plans with lowercase billing frequency for frontend dropdowns
+  const plans = rawPlans.map((p: any) => ({
+    ...p,
+    billingFrequency: (p.billingFrequency?.toLowerCase() || 'monthly') as any,
+  }));
+
+  const subscriptions: Subscription[] = rawSubscriptions.map((s: any) => ({
+    ...s,
+    billingFrequency: (s.billingFrequency?.toLowerCase() || 'monthly') as any,
+  }));
+
+  const createSubscriptionMutation = useCreateSubscription();
+  const updateStatusMutation = useUpdateSubscriptionStatus();
+  const pauseMutation = usePauseSubscription();
+  const resumeMutation = useResumeSubscription();
+  const closeMutation = useCloseSubscription();
+  const updateRenewalMutation = useUpdateRenewal();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -76,12 +100,19 @@ export const SubscriptionList: React.FC = () => {
 
   const handleConfirmPause = (e: React.FormEvent) => {
     e.preventDefault();
-    pauseSubscription(targetSubId, pauseReason);
+    pauseMutation.mutate(
+      { id: targetSubId, reason: pauseReason },
+      {
+        onSuccess: (data: any) => {
+          showToast(data.message || 'Subscription paused.');
+          if (selectedSub?.id === targetSubId && data.subscription) {
+            setSelectedSub(data.subscription);
+          }
+        },
+        onError: (err: any) => showToast(err.message, 'error'),
+      }
+    );
     setIsPauseOpen(false);
-    if (selectedSub?.id === targetSubId) {
-      const updated = subscriptions.find((s) => s.id === targetSubId);
-      if (updated) setSelectedSub(updated);
-    }
   };
 
   const handleOpenClose = (sub: Subscription) => {
@@ -92,12 +123,19 @@ export const SubscriptionList: React.FC = () => {
 
   const handleConfirmClose = (e: React.FormEvent) => {
     e.preventDefault();
-    closeSubscription(targetSubId, closeReason);
+    closeMutation.mutate(
+      { id: targetSubId, reason: closeReason },
+      {
+        onSuccess: (data: any) => {
+          showToast(data.message || 'Subscription closed.');
+          if (selectedSub?.id === targetSubId && data.subscription) {
+            setSelectedSub(data.subscription);
+          }
+        },
+        onError: (err: any) => showToast(err.message, 'error'),
+      }
+    );
     setIsCloseOpen(false);
-    if (selectedSub?.id === targetSubId) {
-      const updated = subscriptions.find((s) => s.id === targetSubId);
-      if (updated) setSelectedSub(updated);
-    }
   };
 
   const handleOpenRenewal = (sub: Subscription) => {
@@ -109,50 +147,88 @@ export const SubscriptionList: React.FC = () => {
 
   const handleConfirmRenewal = (e: React.FormEvent) => {
     e.preventDefault();
-    updateSubscriptionRenewal(targetSubId, autoRenewSetting, renewalNoticeDays);
+    updateRenewalMutation.mutate(
+      {
+        id: targetSubId,
+        autoRenew: autoRenewSetting,
+        renewalNotificationDays: renewalNoticeDays,
+      },
+      {
+        onSuccess: () => {
+          showToast('Renewal settings updated successfully.');
+          if (selectedSub?.id === targetSubId) {
+            setSelectedSub({
+              ...selectedSub,
+              autoRenew: autoRenewSetting,
+              renewalNotificationDays: renewalNoticeDays,
+            });
+          }
+        },
+        onError: (err: any) => showToast(err.message, 'error'),
+      }
+    );
     setIsRenewalOpen(false);
+  };
+
+  const handleResume = (subId: string) => {
+    resumeMutation.mutate(subId, {
+      onSuccess: (data: any) => {
+        showToast(data.message || 'Subscription resumed.');
+        if (selectedSub?.id === subId && data.subscription) {
+          setSelectedSub(data.subscription);
+        }
+      },
+      onError: (err: any) => showToast(err.message, 'error'),
+    });
   };
 
   const handleCreateSubscription = (e: React.FormEvent) => {
     e.preventDefault();
     const cust = customers.find((c) => c.id === newCustId) || customers[0];
     const plan = plans.find((p) => p.id === newPlanId) || plans[0];
-    const defaultProd = products[0];
+    const defaultProd = products[0] || { id: 'prod-1', name: 'Core Platform' };
 
     const today = new Date().toISOString().split('T')[0];
     const oneYearLater = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
       .toISOString()
       .split('T')[0];
 
-    addSubscription({
-      customerId: cust.id,
-      customerName: cust.name,
-      planId: plan.id,
-      planName: plan.name,
-      billingFrequency: plan.billingFrequency,
-      status: newStatus,
-      startDate: today,
-      expiryDate: oneYearLater,
-      nextBillingDate: today,
-      paymentTerms: newTerms,
-      taxReference: newTaxRef,
-      lines: [
-        {
-          id: `sl-${Date.now()}`,
-          productId: defaultProd.id,
-          productName: defaultProd.name,
-          quantity: 1,
-          unitPrice: plan.price,
-          taxRate: 8.25,
-          lineTotal: plan.price,
-        },
-      ],
-      subtotal: plan.price,
-      taxTotal: (plan.price * 8.25) / 100,
-      totalAmount: plan.price + (plan.price * 8.25) / 100,
-      autoRenew: plan.autoRenewDefault,
-      renewalNotificationDays: 14,
-    });
+    const lines = [
+      {
+        id: `sl-${Date.now()}`,
+        productId: defaultProd.id,
+        productName: defaultProd.name,
+        quantity: 1,
+        unitPrice: plan.price,
+        taxRate: 8.25,
+        lineTotal: plan.price,
+      },
+    ];
+
+    createSubscriptionMutation.mutate(
+      {
+        customerId: cust.id,
+        customerName: cust.name,
+        planId: plan.id,
+        planName: plan.name,
+        billingFrequency: plan.billingFrequency.toUpperCase(),
+        startDate: today,
+        expiryDate: oneYearLater,
+        nextBillingDate: today,
+        paymentTerms: newTerms,
+        taxReference: newTaxRef,
+        lines,
+        subtotal: plan.price,
+        taxTotal: (plan.price * 8.25) / 100,
+        totalAmount: plan.price * 1.0825,
+        autoRenew: autoRenewSetting,
+        renewalNotificationDays: renewalNoticeDays,
+      },
+      {
+        onSuccess: (data: any) => showToast(data.message || 'Subscription registered.'),
+        onError: (err: any) => showToast(err.message, 'error'),
+      }
+    );
 
     setIsCreateOpen(false);
   };
@@ -278,7 +354,9 @@ export const SubscriptionList: React.FC = () => {
                           {/* Lifecycle Status Progression */}
                           {sub.status === 'DRAFT' && (
                             <button
-                              onClick={() => updateSubscriptionStatus(sub.id, 'QUOTATION')}
+                              onClick={() =>
+                                updateStatusMutation.mutate({ id: sub.id, status: 'QUOTATION' })
+                              }
                               className="px-2 py-1 bg-white hover:bg-neutral-100 text-purple-700 font-bold rounded-lg text-[10px]"
                             >
                               → Quotation
@@ -286,7 +364,9 @@ export const SubscriptionList: React.FC = () => {
                           )}
                           {sub.status === 'QUOTATION' && (
                             <button
-                              onClick={() => updateSubscriptionStatus(sub.id, 'CONFIRMED')}
+                              onClick={() =>
+                                updateStatusMutation.mutate({ id: sub.id, status: 'CONFIRMED' })
+                              }
                               className="px-2 py-1 bg-white hover:bg-neutral-100 text-blue-700 font-bold rounded-lg text-[10px]"
                             >
                               → Confirm
@@ -294,7 +374,9 @@ export const SubscriptionList: React.FC = () => {
                           )}
                           {sub.status === 'CONFIRMED' && (
                             <button
-                              onClick={() => updateSubscriptionStatus(sub.id, 'ACTIVE')}
+                              onClick={() =>
+                                updateStatusMutation.mutate({ id: sub.id, status: 'ACTIVE' })
+                              }
                               className="px-2 py-1 bg-[#0e1013] text-white hover:bg-neutral-800 font-bold rounded-lg text-[10px]"
                             >
                               Activate
@@ -322,7 +404,7 @@ export const SubscriptionList: React.FC = () => {
 
                           {sub.status === 'PAUSED' && (
                             <button
-                              onClick={() => resumeSubscription(sub.id)}
+                              onClick={() => handleResume(sub.id)}
                               className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-[10px] flex items-center space-x-1"
                               title="Resume subscription"
                             >

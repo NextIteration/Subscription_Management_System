@@ -5,6 +5,14 @@ import { Modal } from '../../components/ui/Modal';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { Subscription } from '../../types';
+import { usePortalSubscriptions } from '../../hooks/usePortal';
+import { usePlans } from '../../hooks/usePlans';
+import {
+  usePauseSubscription,
+  useResumeSubscription,
+  useCloseSubscription,
+  useUpdateRenewal,
+} from '../../hooks/useSubscriptions';
 import {
   RefreshCw,
   Pause,
@@ -19,11 +27,14 @@ import {
 
 export const CustomerMySubscriptions: React.FC = () => {
   const { currentUser } = useAuth();
-  const { subscriptions, plans, pauseSubscription, resumeSubscription, closeSubscription, updateSubscriptionRenewal } =
-    useApp();
+  const { showToast } = useApp();
+  const { data: mySubs = [], isLoading } = usePortalSubscriptions();
+  const { data: plans = [] } = usePlans();
 
-  const customerId = currentUser?.customerId || 'cust-1';
-  const mySubs = subscriptions.filter((s) => s.customerId === customerId);
+  const pauseMutation = usePauseSubscription();
+  const resumeMutation = useResumeSubscription();
+  const closeMutation = useCloseSubscription();
+  const updateRenewalMutation = useUpdateRenewal();
 
   const [selectedSub, setSelectedSub] = useState<Subscription | null>(null);
   const [isPauseOpen, setIsPauseOpen] = useState(false);
@@ -34,25 +45,50 @@ export const CustomerMySubscriptions: React.FC = () => {
   const handlePause = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedSub) return;
-    pauseSubscription(selectedSub.id, pauseReason);
+    pauseMutation.mutate(
+      { id: selectedSub.id, reason: pauseReason },
+      {
+        onSuccess: (data: any) => showToast(data.message || 'Subscription paused.'),
+        onError: (err: any) => showToast(err.message, 'error'),
+      }
+    );
     setIsPauseOpen(false);
     setSelectedSub(null);
   };
 
   const handleResume = (sub: Subscription) => {
-    resumeSubscription(sub.id);
+    resumeMutation.mutate(sub.id, {
+      onSuccess: (data: any) => showToast(data.message || 'Subscription resumed.'),
+      onError: (err: any) => showToast(err.message, 'error'),
+    });
   };
 
   const handleClose = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedSub) return;
-    closeSubscription(selectedSub.id, closeReason);
+    closeMutation.mutate(
+      { id: selectedSub.id, reason: closeReason },
+      {
+        onSuccess: (data: any) => showToast(data.message || 'Subscription closed.'),
+        onError: (err: any) => showToast(err.message, 'error'),
+      }
+    );
     setIsCloseOpen(false);
     setSelectedSub(null);
   };
 
   const handleToggleRenewal = (sub: Subscription) => {
-    updateSubscriptionRenewal(sub.id, !sub.autoRenew, sub.renewalNotificationDays);
+    updateRenewalMutation.mutate(
+      {
+        id: sub.id,
+        autoRenew: !sub.autoRenew,
+        renewalNotificationDays: sub.renewalNotificationDays,
+      },
+      {
+        onSuccess: () => showToast('Renewal preference updated.'),
+        onError: (err: any) => showToast(err.message, 'error'),
+      }
+    );
   };
 
   return (

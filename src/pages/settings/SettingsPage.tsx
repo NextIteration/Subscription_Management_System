@@ -24,9 +24,9 @@ export const SettingsPage: React.FC = () => {
   const [staffEmail, setStaffEmail] = useState('');
   const [staffMsg, setStaffMsg] = useState('');
 
-  const handleCreateStaff = (e: React.FormEvent) => {
+  const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = createStaffAccount(staffName, staffEmail);
+    const res = await createStaffAccount(staffName, staffEmail);
     if (res.success) {
       showToast(res.message);
       setIsStaffModalOpen(false);

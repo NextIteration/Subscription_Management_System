@@ -10,6 +10,7 @@ export const Register: React.FC = () => {
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<'customer' | 'staff' | 'admin'>('customer');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const { register } = useAuth();
   const navigate = useNavigate();
 
@@ -19,15 +20,25 @@ export const Register: React.FC = () => {
   const hasLower = /[a-z]/.test(password);
   const hasSpecial = /[^A-Za-z0-9]/.test(password);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    const res = register(name, email, password, role, company);
-    if (res.success) {
-      navigate(role === 'customer' ? '/portal' : '/');
-    } else {
-      setError(res.error || 'Registration failed');
+    if (!hasMinLength || !hasUpper || !hasLower || !hasSpecial) {
+      setError('Password must meet all PRD criteria: >8 chars, upper, lower, and special char.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await register(name, email, password, role, company);
+      if (res.success) {
+        navigate(role === 'customer' ? '/portal' : '/');
+      } else {
+        setError(res.error || 'Registration failed');
+      }
+    } finally {
+      setLoading(false);
     }
   };
 

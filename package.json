@@ -6,9 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "server:dev": "npm run dev --prefix server",
+    "server:build": "npm run build --prefix server"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.105.0",
+    "axios": "^1.21.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.469.0",
     "react": "^18.3.1",
@@ -29,4 +33,3 @@
     "vite": "^6.0.7"
   }
 }
-

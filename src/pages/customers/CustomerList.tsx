@@ -5,6 +5,12 @@ import { Modal } from '../../components/ui/Modal';
 import { useApp } from '../../context/AppContext';
 import { Customer } from '../../types';
 import {
+  useCustomers,
+  useCreateCustomer,
+  useUpdateCustomer,
+  useDeleteCustomer,
+} from '../../hooks/useCustomers';
+import {
   Users,
   Plus,
   Search,
@@ -18,12 +24,18 @@ import {
 } from 'lucide-react';
 
 export const CustomerList: React.FC = () => {
-  const { customers, addCustomer, updateCustomer, deleteCustomer, subscriptions, invoices } = useApp();
+  const { subscriptions, invoices, showToast } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+
+  const { data: customerData, isLoading } = useCustomers(searchTerm);
+  const customers = customerData?.data || [];
+  const createCustomerMutation = useCreateCustomer();
+  const updateCustomerMutation = useUpdateCustomer();
+  const deleteCustomerMutation = useDeleteCustomer();
 
   // Form states
   const [formData, setFormData] = useState({
@@ -76,11 +88,29 @@ export const CustomerList: React.FC = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (editingCustomer) {
-      updateCustomer(editingCustomer.id, formData);
+      updateCustomerMutation.mutate(
+        { id: editingCustomer.id, updates: formData },
+        {
+          onSuccess: () => showToast('Customer updated successfully.'),
+          onError: (err: any) => showToast(err.message, 'error'),
+        }
+      );
     } else {
-      addCustomer(formData);
+      createCustomerMutation.mutate(formData, {
+        onSuccess: () => showToast('Customer created successfully.'),
+        onError: (err: any) => showToast(err.message, 'error'),
+      });
     }
     setIsCreateModalOpen(false);
+  };
+
+  const handleDelete = (id: string) => {
+    if (confirm('Are you sure you want to deactivate this customer?')) {
+      deleteCustomerMutation.mutate(id, {
+        onSuccess: () => showToast('Customer deactivated.', 'info'),
+        onError: (err: any) => showToast(err.message, 'error'),
+      });
+    }
   };
 
   return (
@@ -226,9 +256,9 @@ export const CustomerList: React.FC = () => {
                             <Edit2 size={14} />
                           </button>
                           <button
-                            onClick={() => deleteCustomer(customer.id)}
+                            onClick={() => handleDelete(customer.id)}
                             className="p-1.5 rounded-full hover:bg-[#ffe4e6] text-neutral-400 hover:text-rose-600 transition"
-                            title="Delete customer"
+                            title="Deactivate customer"
                           >
                             <Trash2 size={14} />
                           </button>

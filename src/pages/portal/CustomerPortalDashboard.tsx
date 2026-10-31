@@ -4,21 +4,25 @@ import { MetricCard, DarkStatusCard } from '../../components/ui/StatCard';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
+import { usePortalDashboard, usePortalSubscriptions } from '../../hooks/usePortal';
 import { RefreshCw, Receipt, CreditCard, Shield, Clock, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export const CustomerPortalDashboard: React.FC = () => {
   const { currentUser } = useAuth();
-  const { subscriptions, invoices, payments } = useApp();
+  const { invoices, payments } = useApp();
   const navigate = useNavigate();
+
+  const { data: portalData } = usePortalDashboard();
+  const { data: portalSubs = [] } = usePortalSubscriptions();
 
   // Enforce customer scoping: customer only accesses their own records
   const customerId = currentUser?.customerId || 'cust-1';
-  const mySubs = subscriptions.filter((s) => s.customerId === customerId);
+  const mySubs = portalSubs.length > 0 ? portalSubs : [];
   const myInvoices = invoices.filter((i) => i.customerId === customerId);
   const myPayments = payments.filter((p) => p.customerId === customerId);
 
-  const activeSubsCount = mySubs.filter((s) => s.status === 'ACTIVE').length;
+  const activeSubsCount = portalData?.stats.activeSubscriptions ?? mySubs.filter((s) => s.status === 'ACTIVE').length;
   const unpaidInvoices = myInvoices.filter((i) => i.status === 'issued' || i.status === 'overdue');
   const totalDue = unpaidInvoices.reduce((sum, i) => sum + i.amountDue, 0);
 

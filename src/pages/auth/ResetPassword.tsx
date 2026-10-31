@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { KeyRound, CheckCircle } from 'lucide-react';
 
 export const ResetPassword: React.FC = () => {
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get('token') || 'simulated_token';
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [loading, setLoading] = useState(false);
   const { resetPassword } = useAuth();
   const navigate = useNavigate();
 
@@ -17,7 +20,7 @@ export const ResetPassword: React.FC = () => {
   const hasLower = /[a-z]/.test(password);
   const hasSpecial = /[^A-Za-z0-9]/.test(password);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -26,12 +29,22 @@ export const ResetPassword: React.FC = () => {
       return;
     }
 
-    const res = resetPassword('simulated_token', password);
-    if (res.success) {
-      setSuccess(true);
-      setTimeout(() => navigate('/auth/login'), 2000);
-    } else {
-      setError(res.message);
+    if (!hasMinLength || !hasUpper || !hasLower || !hasSpecial) {
+      setError('Password must be longer than 8 characters and contain uppercase, lowercase and a special character.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await resetPassword(token, password);
+      if (res.success) {
+        setSuccess(true);
+        setTimeout(() => navigate('/auth/login'), 2000);
+      } else {
+        setError(res.message);
+      }
+    } finally {
+      setLoading(false);
     }
   };
 

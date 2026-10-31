@@ -3,6 +3,7 @@ import { Header } from '../../components/layout/Header';
 import { Modal } from '../../components/ui/Modal';
 import { useApp } from '../../context/AppContext';
 import { Plan, BillingFrequency } from '../../types';
+import { usePlans, useCreatePlan, useUpdatePlan } from '../../hooks/usePlans';
 import {
   Layers,
   Plus,
@@ -15,7 +16,17 @@ import {
 } from 'lucide-react';
 
 export const PlanList: React.FC = () => {
-  const { plans, addPlan, updatePlan } = useApp();
+  const { showToast } = useApp();
+  const { data: rawPlans = [], isLoading } = usePlans();
+  const createPlanMutation = useCreatePlan();
+  const updatePlanMutation = useUpdatePlan();
+
+  // Normalize lowercase billingFrequency for frontend component display
+  const plans: Plan[] = rawPlans.map((p: any) => ({
+    ...p,
+    billingFrequency: (p.billingFrequency?.toLowerCase() || 'monthly') as BillingFrequency,
+  }));
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
 
@@ -69,36 +80,34 @@ export const PlanList: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const payload = {
+      name,
+      code,
+      billingFrequency: billingFrequency.toUpperCase() as any,
+      minimumQuantity: Number(minimumQuantity),
+      price: Number(price),
+      availableFrom,
+      availableUntil,
+      autoRenewDefault,
+      earlyClosurePenaltyPercentage: Number(earlyClosurePenaltyPercentage),
+      pauseAllowed,
+      maxPauseDays: Number(maxPauseDays),
+      description,
+      status: 'active' as const,
+    };
+
     if (editingPlan) {
-      updatePlan(editingPlan.id, {
-        name,
-        code,
-        billingFrequency,
-        minimumQuantity: Number(minimumQuantity),
-        price: Number(price),
-        availableFrom,
-        availableUntil,
-        autoRenewDefault,
-        earlyClosurePenaltyPercentage: Number(earlyClosurePenaltyPercentage),
-        pauseAllowed,
-        maxPauseDays: Number(maxPauseDays),
-        description,
-      });
+      updatePlanMutation.mutate(
+        { id: editingPlan.id, updates: payload },
+        {
+          onSuccess: () => showToast('Plan updated successfully.'),
+          onError: (err: any) => showToast(err.message, 'error'),
+        }
+      );
     } else {
-      addPlan({
-        name,
-        code,
-        billingFrequency,
-        minimumQuantity: Number(minimumQuantity),
-        price: Number(price),
-        availableFrom,
-        availableUntil,
-        autoRenewDefault,
-        earlyClosurePenaltyPercentage: Number(earlyClosurePenaltyPercentage),
-        pauseAllowed,
-        maxPauseDays: Number(maxPauseDays),
-        description,
-        status: 'active',
+      createPlanMutation.mutate(payload, {
+        onSuccess: () => showToast('Plan created successfully.'),
+        onError: (err: any) => showToast(err.message, 'error'),
       });
     }
     setIsModalOpen(false);

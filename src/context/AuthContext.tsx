@@ -1,168 +1,156 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
 import { initialUsers } from '../data/mockData';
+import { api } from '../lib/api';
 
 interface AuthContextType {
   currentUser: User | null;
   role: UserRole;
-  login: (email: string, password: string) => { success: boolean; error?: string };
-  register: (name: string, email: string, password: string, role?: UserRole, company?: string) => { success: boolean; error?: string };
-  logout: () => void;
-  requestPasswordReset: (email: string) => { success: boolean; message: string };
-  resetPassword: (token: string, newPassword: string) => { success: boolean; message: string };
   users: User[];
-  createStaffAccount: (name: string, email: string) => { success: boolean; message: string };
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  register: (
+    name: string,
+    email: string,
+    password: string,
+    role?: UserRole,
+    company?: string
+  ) => Promise<{ success: boolean; error?: string }>;
+  logout: () => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<{ success: boolean; message: string }>;
+  resetPassword: (token: string, newPassword: string) => Promise<{ success: boolean; message: string }>;
+  createStaffAccount: (name: string, email: string) => Promise<{ success: boolean; message: string }>;
+  isLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [users, setUsers] = useState<User[]>(() => {
-    const saved = localStorage.getItem('bl_users_v2');
-    return saved ? JSON.parse(saved) : initialUsers;
-  });
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [users, setUsers] = useState<User[]>(initialUsers);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('bl_current_user_v2');
-    return saved ? JSON.parse(saved) : initialUsers[0]; // Authenticated Admin user
-  });
-
+  // Check existing session cookie on initial app mount
   useEffect(() => {
-    localStorage.setItem('bl_users_v2', JSON.stringify(users));
-  }, [users]);
-
-  useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem('bl_current_user_v2', JSON.stringify(currentUser));
-    } else {
-      localStorage.removeItem('bl_current_user_v2');
+    let mounted = true;
+    async function verifySession() {
+      try {
+        const res = await api.get<{ user: User }>('/auth/me');
+        if (mounted && res.data?.user) {
+          setCurrentUser(res.data.user);
+        }
+      } catch {
+        if (mounted) {
+          setCurrentUser(null);
+        }
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
+        }
+      }
     }
-  }, [currentUser]);
-
-  const validatePassword = (pwd: string): boolean => {
-    // Longer than 8 chars, uppercase, lowercase, special character
-    const hasMinLength = pwd.length > 8;
-    const hasUpper = /[A-Z]/.test(pwd);
-    const hasLower = /[a-z]/.test(pwd);
-    const hasSpecial = /[^A-Za-z0-9]/.test(pwd);
-    return hasMinLength && hasUpper && hasLower && hasSpecial;
-  };
-
-  const login = (email: string, password: string) => {
-    const normalizedEmail = email.trim().toLowerCase();
-    const user = users.find(
-      (u) =>
-        u.email.toLowerCase() === normalizedEmail ||
-        (normalizedEmail === 'admin@brightloop.io' && u.email === 'admin@brightloop.io') ||
-        (normalizedEmail === 'james.anderson@brightloop.io' && u.role === 'admin') ||
-        (normalizedEmail === 'staff@brightloop.io' && u.email === 'staff@brightloop.io') ||
-        (normalizedEmail === 'sarah.connor@brightloop.io' && u.role === 'staff')
-    );
-
-    if (!user) {
-      return { success: false, error: 'No account found with this email address.' };
-    }
-
-    if (user.password && user.password !== password) {
-      return { success: false, error: 'Invalid password. Please check your credentials.' };
-    }
-
-    setCurrentUser(user);
-    return { success: true };
-  };
-
-  const register = (name: string, email: string, password: string, role: UserRole = 'customer', company?: string) => {
-    if (users.some((u) => u.email.toLowerCase() === email.toLowerCase())) {
-      return { success: false, error: 'An account with this email address already exists.' };
-    }
-    if (!validatePassword(password)) {
-      return {
-        success: false,
-        error: 'Password must be longer than 8 characters and contain at least one uppercase letter, one lowercase letter, and one special character.',
-      };
-    }
-
-    const newUser: User = {
-      id: `usr-${Date.now()}`,
-      name,
-      email,
-      role,
-      password,
-      company: company || `${name}'s Company`,
-      customerId: role === 'customer' ? `cust-${Date.now()}` : undefined,
-      avatar: `https://images.unsplash.com/photo-1535713875002?w=150&auto=format&fit=crop&q=80`,
+    verifySession();
+    return () => {
+      mounted = false;
     };
+  }, []);
 
-    setUsers((prev) => [...prev, newUser]);
-    setCurrentUser(newUser);
-    return { success: true };
+  const login = async (email: string, password: string) => {
+    try {
+      const res = await api.post<{ message: string; user: User }>('/auth/login', {
+        email: email.trim(),
+        password,
+      });
+      setCurrentUser(res.data.user);
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Login failed. Please check credentials.' };
+    }
   };
 
-  const createStaffAccount = (name: string, email: string) => {
-    if (currentUser?.role !== 'admin') {
-      return { success: false, message: 'Only Admins can create staff accounts.' };
+  const register = async (
+    name: string,
+    email: string,
+    password: string,
+    role: UserRole = 'customer',
+    company?: string
+  ) => {
+    try {
+      // Map lowercase role to uppercase enum for backend
+      const res = await api.post<{ message: string; user: User }>('/auth/register', {
+        name,
+        email: email.trim(),
+        password,
+        role: role.toUpperCase(),
+        company,
+      });
+      setCurrentUser(res.data.user);
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Registration failed.' };
     }
-    if (users.some((u) => u.email.toLowerCase() === email.toLowerCase())) {
-      return { success: false, message: 'An account with this email already exists.' };
-    }
-    const newStaff: User = {
-      id: `usr-${Date.now()}`,
-      name,
-      email,
-      role: 'staff',
-      password: 'Staff#2026!',
-      company: 'Brightloop Internal Ops',
-      avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80',
-    };
-    setUsers((prev) => [...prev, newStaff]);
-    return { success: true, message: `Staff account created for ${name} (${email}). Default temporary password: Staff#2026!` };
   };
 
-  const logout = () => {
-    setCurrentUser(null);
+  const createStaffAccount = async (name: string, email: string) => {
+    try {
+      const res = await api.post<{ message: string; staff: User }>('/auth/staff', {
+        name,
+        email: email.trim(),
+      });
+      if (res.data?.staff) {
+        setUsers((prev) => [...prev, res.data.staff]);
+      }
+      return { success: true, message: res.data.message };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Failed to create staff account.' };
+    }
   };
 
-  const requestPasswordReset = (email: string) => {
-    const user = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
-    if (!user) {
-      return { success: false, message: 'If an account exists with that email, a reset link has been dispatched.' };
+  const logout = async () => {
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      // ignore logout network errors
+    } finally {
+      setCurrentUser(null);
     }
-    return {
-      success: true,
-      message: `Password reset email dispatched to ${email}. Check your inbox for the secure reset link.`,
-    };
   };
 
-  const resetPassword = (_token: string, newPassword: string) => {
-    if (!validatePassword(newPassword)) {
-      return {
-        success: false,
-        message: 'Password must be longer than 8 characters with uppercase, lowercase, and a special character.',
-      };
+  const requestPasswordReset = async (email: string) => {
+    try {
+      const res = await api.post<{ message: string }>('/auth/forgot-password', {
+        email: email.trim(),
+      });
+      return { success: true, message: res.data.message };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Failed to dispatch reset email.' };
     }
-    if (currentUser) {
-      const updated = { ...currentUser, password: newPassword };
-      setCurrentUser(updated);
-      setUsers((prev) => prev.map((u) => (u.id === currentUser.id ? updated : u)));
+  };
+
+  const resetPassword = async (token: string, newPassword: string) => {
+    try {
+      const res = await api.post<{ message: string }>('/auth/reset-password', {
+        token,
+        newPassword,
+      });
+      return { success: true, message: res.data.message };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Failed to reset password.' };
     }
-    return {
-      success: true,
-      message: 'Password successfully updated. You may now log in with your new credentials.',
-    };
   };
 
   return (
     <AuthContext.Provider
       value={{
         currentUser,
-        role: currentUser?.role || 'admin',
+        role: (currentUser?.role || 'customer') as UserRole,
+        users,
         login,
         register,
         logout,
         requestPasswordReset,
         resetPassword,
-        users,
         createStaffAccount,
+        isLoading,
       }}
     >
       {children}

@@ -5,6 +5,17 @@ import { Modal } from '../../components/ui/Modal';
 import { useApp } from '../../context/AppContext';
 import { Quotation, QuotationTemplate, LineItem } from '../../types';
 import {
+  useQuotations,
+  useQuotationTemplates,
+  useCreateQuotation,
+  useUpdateQuotationStatus,
+  useConvertQuotation,
+  useCreateQuotationTemplate,
+} from '../../hooks/useQuotations';
+import { useCustomers } from '../../hooks/useCustomers';
+import { usePlans } from '../../hooks/usePlans';
+import { useProducts } from '../../hooks/useProducts';
+import {
   FileSpreadsheet,
   Plus,
   Search,
@@ -20,18 +31,26 @@ import {
 import { useNavigate } from 'react-router-dom';
 
 export const QuotationList: React.FC = () => {
-  const {
-    quotations,
-    quotationTemplates,
-    customers,
-    plans,
-    products,
-    addQuotation,
-    updateQuotationStatus,
-    convertQuotationToSubscription,
-    addQuotationTemplate,
-  } = useApp();
+  const { showToast } = useApp();
   const navigate = useNavigate();
+
+  const { data: rawQuotations = [], isLoading: isQuotationsLoading } = useQuotations();
+  const { data: quotationTemplates = [] } = useQuotationTemplates();
+  const { data: customerData } = useCustomers();
+  const customers = customerData?.data || [];
+  const { data: plans = [] } = usePlans();
+  const { data: products = [] } = useProducts();
+
+  const createQuotationMutation = useCreateQuotation();
+  const updateStatusMutation = useUpdateQuotationStatus();
+  const convertMutation = useConvertQuotation();
+  const createTemplateMutation = useCreateQuotationTemplate();
+
+  // Normalize status casing for UI badge
+  const quotations: Quotation[] = rawQuotations.map((q: any) => ({
+    ...q,
+    status: (q.status?.toLowerCase() || 'draft') as Quotation['status'],
+  }));
 
   const [activeTab, setActiveTab] = useState<'quotations' | 'templates'>('quotations');
   const [searchTerm, setSearchTerm] = useState('');
@@ -140,37 +159,48 @@ export const QuotationList: React.FC = () => {
       .toISOString()
       .split('T')[0];
 
-    addQuotation({
-      customerId: cust.id,
-      customerName: cust.name,
-      customerEmail: cust.email,
-      planId: plan.id,
-      planName: plan.name,
-      templateId: selectedTemplate || undefined,
-      status: 'draft',
-      validUntil: validUntilDate,
-      lines,
-      subtotal: calculateSubtotal(),
-      taxAmount: calculateTax(),
-      discountAmount: 0,
-      totalAmount: calculateTotal(),
-      notes,
-    });
+    createQuotationMutation.mutate(
+      {
+        customerId: cust.id,
+        customerName: cust.name,
+        customerEmail: cust.email,
+        planId: plan.id,
+        planName: plan.name,
+        templateId: selectedTemplate || undefined,
+        validUntil: validUntilDate,
+        lines,
+        subtotal: calculateSubtotal(),
+        taxAmount: calculateTax(),
+        discountAmount: 0,
+        totalAmount: calculateTotal(),
+        notes,
+      },
+      {
+        onSuccess: (data: any) => showToast(data.message || 'Quotation created successfully.'),
+        onError: (err: any) => showToast(err.message, 'error'),
+      }
+    );
 
     setIsQuotationModalOpen(false);
   };
 
   const handleCreateTemplate = (e: React.FormEvent) => {
     e.preventDefault();
-    addQuotationTemplate({
-      name: tmplName,
-      description: tmplDesc,
-      planId: tmplPlanId,
-      validityDays: tmplValidity,
-      defaultLines: [
-        { productId: products[0].id, quantity: 1 },
-      ],
-    });
+    createTemplateMutation.mutate(
+      {
+        name: tmplName,
+        description: tmplDesc,
+        planId: tmplPlanId,
+        validityDays: tmplValidity,
+        defaultLines: [
+          { productId: products[0]?.id || 'prod-1', quantity: 1 },
+        ],
+      },
+      {
+        onSuccess: () => showToast('Quotation template created successfully.'),
+        onError: (err: any) => showToast(err.message, 'error'),
+      }
+    );
     setIsTemplateModalOpen(false);
   };
 
@@ -296,7 +326,15 @@ export const QuotationList: React.FC = () => {
                         <div className="flex items-center justify-center space-x-1.5">
                           {q.status === 'draft' && (
                             <button
-                              onClick={() => updateQuotationStatus(q.id, 'sent')}
+                              onClick={() =>
+                                updateStatusMutation.mutate(
+                                  { id: q.id, status: 'SENT' },
+                                  {
+                                    onSuccess: () => showToast('Quotation sent to client.'),
+                                    onError: (err: any) => showToast(err.message, 'error'),
+                                  }
+                                )
+                              }
                               className="px-2.5 py-1 bg-white hover:bg-sky-50 text-sky-800 rounded-lg text-[11px] font-bold flex items-center space-x-1 shadow-2xs"
                               title="Dispatch quotation to client"
                             >
@@ -308,7 +346,13 @@ export const QuotationList: React.FC = () => {
                           {q.status === 'sent' && (
                             <button
                               disabled={isExpired}
-                              onClick={() => convertQuotationToSubscription(q.id)}
+                              onClick={() =>
+                                convertMutation.mutate(q.id, {
+                                  onSuccess: (data: any) =>
+                                    showToast(data.message || 'Quotation converted to subscription!'),
+                                  onError: (err: any) => showToast(err.message, 'error'),
+                                })
+                              }
                               className="px-2.5 py-1 bg-[#0e1013] hover:bg-neutral-800 text-white rounded-lg text-[11px] font-bold flex items-center space-x-1 disabled:opacity-40"
                               title="Accept and convert quotation into live subscription"
                             >
@@ -441,7 +485,10 @@ export const QuotationList: React.FC = () => {
               {selectedQuotation.status !== 'accepted' && (
                 <button
                   onClick={() => {
-                    convertQuotationToSubscription(selectedQuotation.id);
+                    convertMutation.mutate(selectedQuotation.id, {
+                      onSuccess: (data: any) => showToast(data.message || 'Quotation converted to subscription!'),
+                      onError: (err: any) => showToast(err.message, 'error'),
+                    });
                     setSelectedQuotation(null);
                   }}
                   className="px-5 py-2.5 rounded-full bg-[#0e1013] text-white font-bold hover:bg-neutral-800 transition shadow-xs flex items-center space-x-2"

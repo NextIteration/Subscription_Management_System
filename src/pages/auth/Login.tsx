@@ -7,29 +7,24 @@ export const Login: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const { login, users } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const { login } = useAuth();
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
-    const res = login(email, password);
-    if (res.success) {
-      // Direct user according to authenticated role
-      const matchedUser = users.find(
-        (u) =>
-          u.email.toLowerCase() === email.trim().toLowerCase() ||
-          (email.trim().toLowerCase() === 'admin@brightloop.io' && u.role === 'admin') ||
-          (email.trim().toLowerCase() === 'staff@brightloop.io' && u.role === 'staff')
-      );
-      if (matchedUser?.role === 'customer') {
-        navigate('/portal');
-      } else {
+    try {
+      const res = await login(email, password);
+      if (res.success) {
         navigate('/');
+      } else {
+        setError(res.error || 'Authentication failed. Please verify your credentials.');
       }
-    } else {
-      setError(res.error || 'Authentication failed. Please verify your credentials.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -92,10 +87,11 @@ export const Login: React.FC = () => {
 
           <button
             type="submit"
-            className="w-full mt-2 bg-[#0e1013] hover:bg-neutral-800 text-white font-bold text-sm py-3 px-4 rounded-full transition flex items-center justify-center space-x-2 shadow-sm"
+            disabled={loading}
+            className="w-full mt-2 bg-[#0e1013] hover:bg-neutral-800 disabled:opacity-60 text-white font-bold text-sm py-3 px-4 rounded-full transition flex items-center justify-center space-x-2 shadow-sm"
           >
             <LogIn size={16} />
-            <span>Sign in to Brightloop</span>
+            <span>{loading ? 'Signing in...' : 'Sign in to Brightloop'}</span>
           </button>
         </form>
 

@@ -1,8 +1,19 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppProvider } from './context/AppContext';
 import { AppLayout } from './components/layout/AppLayout';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 30, // 30 seconds
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 // Pages
 import { Login } from './pages/auth/Login';
@@ -28,7 +39,14 @@ import { CustomerMySubscriptions } from './pages/portal/CustomerMySubscriptions'
 import { CustomerMyInvoices } from './pages/portal/CustomerMyInvoices';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, isLoading } = useAuth();
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#dcebf5] flex items-center justify-center">
+        <div className="w-8 h-8 rounded-full border-2 border-[#0e1013] border-t-transparent animate-spin"></div>
+      </div>
+    );
+  }
   if (!currentUser) {
     return <Navigate to="/auth/login" replace />;
   }
@@ -40,7 +58,14 @@ const RoleRoute: React.FC<{
   allowedRoles: ('admin' | 'staff' | 'customer')[];
   children: React.ReactNode;
 }> = ({ allowedRoles, children }) => {
-  const { currentUser, role } = useAuth();
+  const { currentUser, role, isLoading } = useAuth();
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#dcebf5] flex items-center justify-center">
+        <div className="w-8 h-8 rounded-full border-2 border-[#0e1013] border-t-transparent animate-spin"></div>
+      </div>
+    );
+  }
   if (!currentUser) {
     return <Navigate to="/auth/login" replace />;
   }
@@ -202,13 +227,15 @@ export const AppContent: React.FC = () => {
 
 export const App: React.FC = () => {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <AppProvider>
-          <AppContent />
-        </AppProvider>
-      </AuthProvider>
-    </BrowserRouter>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <AuthProvider>
+          <AppProvider>
+            <AppContent />
+          </AppProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    </QueryClientProvider>
   );
 };
 

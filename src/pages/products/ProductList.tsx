@@ -3,10 +3,21 @@ import { Header } from '../../components/layout/Header';
 import { Modal } from '../../components/ui/Modal';
 import { useApp } from '../../context/AppContext';
 import { Product, ProductVariant } from '../../types';
+import {
+  useProducts,
+  useCreateProduct,
+  useUpdateProduct,
+  useArchiveProduct,
+} from '../../hooks/useProducts';
 import { Package, Plus, Edit2, Trash2, Layers, DollarSign, Tag, Info } from 'lucide-react';
 
 export const ProductList: React.FC = () => {
-  const { products, addProduct, updateProduct, archiveProduct } = useApp();
+  const { showToast } = useApp();
+  const { data: products = [], isLoading } = useProducts();
+  const createProductMutation = useCreateProduct();
+  const updateProductMutation = useUpdateProduct();
+  const archiveProductMutation = useArchiveProduct();
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
@@ -63,26 +74,50 @@ export const ProductList: React.FC = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (editingProduct) {
-      updateProduct(editingProduct.id, {
-        name,
-        type,
-        salesPrice: Number(salesPrice),
-        costPrice: Number(costPrice),
-        notes,
-        variants,
-      });
+      updateProductMutation.mutate(
+        {
+          id: editingProduct.id,
+          updates: {
+            name,
+            type,
+            salesPrice: Number(salesPrice),
+            costPrice: Number(costPrice),
+            notes,
+            variants,
+          },
+        },
+        {
+          onSuccess: () => showToast('Product updated successfully.'),
+          onError: (err: any) => showToast(err.message, 'error'),
+        }
+      );
     } else {
-      addProduct({
-        name,
-        type,
-        salesPrice: Number(salesPrice),
-        costPrice: Number(costPrice),
-        notes,
-        status: 'active',
-        variants,
-      });
+      createProductMutation.mutate(
+        {
+          name,
+          type,
+          salesPrice: Number(salesPrice),
+          costPrice: Number(costPrice),
+          notes,
+          status: 'active',
+          variants,
+        },
+        {
+          onSuccess: () => showToast('Product created successfully.'),
+          onError: (err: any) => showToast(err.message, 'error'),
+        }
+      );
     }
     setIsModalOpen(false);
+  };
+
+  const handleArchive = (id: string) => {
+    if (confirm('Are you sure you want to archive this product?')) {
+      archiveProductMutation.mutate(id, {
+        onSuccess: () => showToast('Product archived.', 'info'),
+        onError: (err: any) => showToast(err.message, 'error'),
+      });
+    }
   };
 
   return (
@@ -133,8 +168,9 @@ export const ProductList: React.FC = () => {
                     <Edit2 size={15} />
                   </button>
                   <button
-                    onClick={() => archiveProduct(product.id)}
+                    onClick={() => handleArchive(product.id)}
                     className="p-1.5 rounded-full hover:bg-rose-100 text-neutral-400 hover:text-rose-600 transition"
+                    title="Archive product"
                   >
                     <Trash2 size={15} />
                   </button>

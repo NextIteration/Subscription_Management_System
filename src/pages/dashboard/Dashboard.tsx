@@ -21,17 +21,20 @@ import {
 } from 'recharts';
 import { mockRevenueChartData, mockRecentActivities, mockTodoItems } from '../../data/mockData';
 import { useApp } from '../../context/AppContext';
+import { useDashboardMetrics } from '../../hooks/useDashboard';
 import { useNavigate } from 'react-router-dom';
 
 export const Dashboard: React.FC = () => {
   const { subscriptions, invoices, customers, showToast } = useApp();
+  const { data: dashboardData } = useDashboardMetrics();
   const navigate = useNavigate();
   const [engineProgress, setEngineProgress] = useState(68);
   const [engineRunning, setEngineRunning] = useState(false);
 
-  // Dynamic calculations
-  const activeSubs = subscriptions.filter((s) => s.status === 'ACTIVE').length;
+  // Dynamic calculations from backend metrics with graceful fallback
+  const activeSubs = dashboardData?.metrics?.activeSubscriptionsCount ?? subscriptions.filter((s) => s.status === 'ACTIVE').length;
   const overdueInvoices = invoices.filter((i) => i.status === 'overdue').length;
+  const newClients = dashboardData?.metrics?.newClientsThisMonth ?? customers.length;
   const totalCollected = invoices
     .filter((i) => i.status === 'paid')
     .reduce((sum, i) => sum + i.amountPaid, 0);
