@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #e5eff5;
+    color: #101828;
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+}
+
+/* Custom soft scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(140, 170, 195, 0.4);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 140, 170, 0.6);
+}
+
+/* Rounded card utilities matching screenshot */
+.soft-card {
+  background-color: #d8e6f1;
+  border-radius: 1.5rem;
+  transition: all 0.2s ease;
+}
+
+.soft-card-deeper {
+  background-color: #ccdeeb;
+  border-radius: 1.5rem;
+}
+
+.black-card {
+  background-color: #0e1013;
+  color: #ffffff;
+  border-radius: 1.75rem;
+}
+
