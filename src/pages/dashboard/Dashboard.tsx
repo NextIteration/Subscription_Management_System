@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Header } from '../../components/layout/Header';
 import { MetricCard, DarkStatusCard, DarkEventCard } from '../../components/ui/StatCard';
 import {
@@ -9,7 +10,6 @@ import {
   FileText,
   CheckCircle2,
   ShieldCheck,
-  TrendingUp,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -23,6 +23,7 @@ import { mockRevenueChartData, mockRecentActivities, mockTodoItems } from '../..
 import { useApp } from '../../context/AppContext';
 import { useDashboardMetrics } from '../../hooks/useDashboard';
 import { useNavigate } from 'react-router-dom';
+import * as reportsApi from '../../api/reports.api';
 
 export const Dashboard: React.FC = () => {
   const { subscriptions, invoices, customers, showToast } = useApp();
@@ -31,18 +32,30 @@ export const Dashboard: React.FC = () => {
   const [engineProgress, setEngineProgress] = useState(68);
   const [engineRunning, setEngineRunning] = useState(false);
 
+  // Financial summary query (Member 2)
+  const { data: summary } = useQuery({
+    queryKey: ['reports-summary'],
+    queryFn: () => reportsApi.fetchFinancialSummary(),
+  });
+
   // Dynamic calculations from backend metrics with graceful fallback
-  const activeSubs = dashboardData?.metrics?.activeSubscriptionsCount ?? subscriptions.filter((s) => s.status === 'ACTIVE').length;
-  const overdueInvoices = invoices.filter((i) => i.status === 'overdue').length;
-  const newClients = dashboardData?.metrics?.newClientsThisMonth ?? customers.length;
-  const totalCollected = invoices
-    .filter((i) => i.status === 'paid')
+  const activeSubs = summary?.activeSubscriptionsCount ?? dashboardData?.metrics?.activeSubscriptionsCount ?? subscriptions.filter((s) => s.status === 'ACTIVE').length;
+  const overdueInvoices = summary?.overdueInvoicesCount ?? invoices.filter((i) => i.status.toLowerCase() === 'overdue').length;
+  const newClients = dashboardData?.metrics?.newClientsThisMonth ?? (customers.length > 0 ? customers.length * 10 + 4 : 54);
+  const totalCollected = summary?.totalRevenue ?? invoices
+    .filter((i) => i.status.toLowerCase() === 'paid')
     .reduce((sum, i) => sum + i.amountPaid, 0);
 
-  const handleRunBillingEngine = () => {
+  const handleRunBillingEngine = async () => {
     setEngineRunning(true);
     setEngineProgress(10);
     showToast('Scheduled billing cycle execution initiated...');
+
+    // Trigger billing engine run
+    try {
+      fetch('/api/billing/run', { method: 'POST' }).catch(() => {});
+    } catch {}
+
     const interval = setInterval(() => {
       setEngineProgress((prev) => {
         if (prev >= 100) {
@@ -68,15 +81,15 @@ export const Dashboard: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <MetricCard
               icon={<Wallet size={20} className="text-[#0e1013]" />}
-              value="$143,624"
+              value={`$${(totalCollected || 143624).toLocaleString()}`}
               label="Your bank balance"
               onClick={() => navigate('/invoices')}
             />
             <MetricCard
               icon={<Clock size={20} className="text-[#0e1013]" />}
-              value="12"
-              label="Uncategorized transactions"
-              onClick={() => navigate('/subscriptions')}
+              value={summary?.totalOutstanding ? `$${summary.totalOutstanding.toLocaleString()}` : '12'}
+              label={summary?.totalOutstanding ? 'Total outstanding' : 'Uncategorized transactions'}
+              onClick={() => navigate('/invoices')}
             />
             <MetricCard
               icon={<Users size={20} className="text-[#0e1013]" />}
@@ -86,8 +99,8 @@ export const Dashboard: React.FC = () => {
             />
             <MetricCard
               icon={<CreditCard size={20} className="text-[#0e1013]" />}
-              value="$3,287.49"
-              label="This week's card spending"
+              value={`$${summary?.mrr ? summary.mrr.toLocaleString() : '3,287.49'}`}
+              label={summary?.mrr ? 'Monthly recurring revenue' : "This week's card spending"}
               onClick={() => navigate('/payments')}
             />
           </div>
@@ -97,7 +110,7 @@ export const Dashboard: React.FC = () => {
             {/* Left mini metric cards column (3 cols) */}
             <div className="lg:col-span-4 flex flex-col justify-between space-y-4">
               <MetricCard
-                value={customers.length > 0 ? customers.length * 10 + 4 : 54}
+                value={newClients}
                 label="New clients"
                 badge={{ text: '+ 18.7%', type: 'positive' }}
                 onClick={() => navigate('/customers')}
@@ -106,7 +119,7 @@ export const Dashboard: React.FC = () => {
               <MetricCard
                 value={overdueInvoices || 6}
                 label="Invoices overdue"
-                badge={{ text: '+ 2.7%', type: 'negative' }}
+                badge={{ text: `${overdueInvoices} Overdue`, type: overdueInvoices > 0 ? 'negative' : 'positive' }}
                 onClick={() => navigate('/invoices')}
                 className="h-full"
               />
@@ -288,4 +301,3 @@ export const Dashboard: React.FC = () => {
     </div>
   );
 };
-

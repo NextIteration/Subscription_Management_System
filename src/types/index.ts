@@ -162,10 +162,11 @@ export interface DiscountRule {
   maxUses: number;
   usedCount: number;
   status: 'active' | 'expired' | 'disabled';
-  applicablePlanIds: string[];
+  applicablePlanIds?: string[];
+  applicableProducts?: { id: string; product: { id: string; name: string } }[];
 }
 
-export type InvoiceStatus = 'draft' | 'issued' | 'paid' | 'overdue' | 'voided';
+export type InvoiceStatus = 'draft' | 'issued' | 'paid' | 'overdue' | 'voided' | 'DRAFT' | 'CONFIRMED' | 'PAID' | 'OVERDUE' | 'CANCELLED';
 
 export interface Invoice {
   id: string;
@@ -197,22 +198,22 @@ export interface Payment {
   customerId: string;
   customerName: string;
   amount: number;
-  paymentMethod: 'Credit Card' | 'Bank Transfer' | 'ACH' | 'Stripe';
+  paymentMethod: 'Credit Card' | 'Bank Transfer' | 'ACH' | 'Stripe' | string;
   paymentDate: string;
   reference: string;
-  status: 'completed' | 'processing' | 'failed';
+  status: 'completed' | 'processing' | 'failed' | string;
   notes?: string;
 }
 
 export interface FinancialMetric {
   totalRevenue: number;
+  totalBilled?: number;
   mrr: number;
   arr: number;
-  outstandingAmount: number;
-  overdueAmount: number;
+  totalOutstanding: number;
+  totalOverdue: number;
   activeSubscriptionsCount: number;
   overdueInvoicesCount: number;
-  newClientsThisMonth: number;
+  newClientsThisMonth?: number;
   collectionRate: number;
 }
-

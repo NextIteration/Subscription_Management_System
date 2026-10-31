@@ -1,42 +1,59 @@
 import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Header } from '../../components/layout/Header';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { Modal } from '../../components/ui/Modal';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { Invoice } from '../../types';
-import { Receipt, Search, Printer, CreditCard, DollarSign, FileText, CheckCircle } from 'lucide-react';
+import { Printer, CreditCard, FileText, Download } from 'lucide-react';
+import * as portalApi from '../../api/portal.api';
 
 export const CustomerMyInvoices: React.FC = () => {
+  const queryClient = useQueryClient();
   const { currentUser } = useAuth();
-  const { invoices, recordPayment } = useApp();
+  const { invoices: fallbackInvoices, showToast } = useApp();
 
   const customerId = currentUser?.customerId || 'cust-1';
-  const myInvoices = invoices.filter((i) => i.customerId === customerId);
+
+  // Query customer invoices
+  const { data: myInvoices = fallbackInvoices.filter((i) => i.customerId === customerId) } = useQuery({
+    queryKey: ['portal-invoices', customerId],
+    queryFn: () => portalApi.fetchPortalInvoices(customerId),
+  });
 
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
   const [payMethod, setPayMethod] = useState<'Credit Card' | 'Bank Transfer'>('Credit Card');
 
-  const handlePay = (e: React.FormEvent) => {
+  // Mutation to pay invoice
+  const payMutation = useMutation({
+    mutationFn: ({ invoiceId, method }: { invoiceId: string; method: string }) =>
+      portalApi.payPortalInvoice(
+        invoiceId,
+        {
+          paymentMethod: method,
+          reference: `CARD-${Math.floor(1000 + Math.random() * 9000)}-SUCCESS`,
+        },
+        customerId
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['portal-invoices'] });
+      showToast('Payment successfully processed and confirmed!');
+      setIsPayModalOpen(false);
+      setSelectedInvoice(null);
+    },
+    onError: (err: any) => showToast(err.message || 'Payment processing failed', 'error'),
+  });
+
+  const handlePay = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedInvoice) return;
 
-    recordPayment({
+    await payMutation.mutateAsync({
       invoiceId: selectedInvoice.id,
-      invoiceNumber: selectedInvoice.invoiceNumber,
-      customerId: selectedInvoice.customerId,
-      customerName: selectedInvoice.customerName,
-      amount: selectedInvoice.amountDue,
-      paymentMethod: payMethod,
-      paymentDate: new Date().toISOString().split('T')[0],
-      reference: `CARD-${Math.floor(1000 + Math.random() * 9000)}-SUCCESS`,
-      status: 'completed',
-      notes: 'Paid via customer self-service portal checkout.',
+      method: payMethod,
     });
-
-    setIsPayModalOpen(false);
-    setSelectedInvoice(null);
   };
 
   return (
@@ -74,14 +91,16 @@ export const CustomerMyInvoices: React.FC = () => {
                   </td>
 
                   <td className="py-3.5 px-3 font-mono text-neutral-600">
-                    {inv.subscriptionNumber || 'Service Charge'}
+                    {inv.subscriptionNumber || (inv as any).subscription?.subscriptionNumber || 'Service Charge'}
                   </td>
 
-                  <td className="py-3.5 px-3 text-neutral-600">{inv.issueDate}</td>
+                  <td className="py-3.5 px-3 text-neutral-600">
+                    {inv.issueDate?.split('T')[0] || inv.issueDate}
+                  </td>
 
                   <td className="py-3.5 px-3 font-medium">
-                    <span className={inv.status === 'overdue' ? 'text-rose-600 font-bold' : ''}>
-                      {inv.dueDate}
+                    <span className={inv.status.toLowerCase() === 'overdue' ? 'text-rose-600 font-bold' : ''}>
+                      {inv.dueDate?.split('T')[0] || inv.dueDate}
                     </span>
                   </td>
 
@@ -105,7 +124,7 @@ export const CustomerMyInvoices: React.FC = () => {
 
                   <td className="py-3.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-center space-x-1.5">
-                      {inv.amountDue > 0 ? (
+                      {inv.amountDue > 0 && inv.status.toUpperCase() !== 'CANCELLED' ? (
                         <button
                           onClick={() => {
                             setSelectedInvoice(inv);
@@ -143,7 +162,7 @@ export const CustomerMyInvoices: React.FC = () => {
           isOpen={!!selectedInvoice}
           onClose={() => setSelectedInvoice(null)}
           title={`Statement ${selectedInvoice.invoiceNumber}`}
-          subtitle={`Due date: ${selectedInvoice.dueDate}`}
+          subtitle={`Due date: ${selectedInvoice.dueDate?.split('T')[0] || selectedInvoice.dueDate}`}
           maxWidth="max-w-2xl"
         >
           <div className="bg-white p-6 rounded-3xl border border-neutral-200 text-xs space-y-4">
@@ -160,7 +179,7 @@ export const CustomerMyInvoices: React.FC = () => {
 
             <div className="space-y-2">
               <span className="font-bold text-[#0e1013] block">Itemized charges:</span>
-              {selectedInvoice.lines.map((l) => (
+              {selectedInvoice.lines?.map((l) => (
                 <div key={l.id} className="flex justify-between bg-neutral-50 p-2.5 rounded-xl">
                   <span>
                     {l.productName} (Qty: {l.quantity})
@@ -179,6 +198,12 @@ export const CustomerMyInvoices: React.FC = () => {
                 <span>Tax:</span>
                 <span>${selectedInvoice.taxAmount.toFixed(2)}</span>
               </div>
+              {selectedInvoice.discountAmount > 0 && (
+                <div className="flex justify-between text-emerald-700 font-bold">
+                  <span>Discount:</span>
+                  <span>-${selectedInvoice.discountAmount.toFixed(2)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-sm font-black text-[#0e1013] pt-1">
                 <span>Balance Due:</span>
                 <span className="text-rose-700">${selectedInvoice.amountDue.toFixed(2)}</span>
@@ -186,15 +211,26 @@ export const CustomerMyInvoices: React.FC = () => {
             </div>
 
             <div className="flex justify-between items-center pt-4 border-t">
-              <button
-                onClick={() => window.print()}
-                className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 rounded-full font-bold flex items-center space-x-1.5"
-              >
-                <Printer size={14} />
-                <span>Print Statement</span>
-              </button>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => window.print()}
+                  className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 rounded-full font-bold flex items-center space-x-1.5"
+                >
+                  <Printer size={14} />
+                  <span>Print</span>
+                </button>
+                <a
+                  href={portalApi.getPortalInvoicePdfUrl(selectedInvoice.id, customerId)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 rounded-full font-bold flex items-center space-x-1.5"
+                >
+                  <Download size={14} />
+                  <span>PDF</span>
+                </a>
+              </div>
 
-              {selectedInvoice.amountDue > 0 && (
+              {selectedInvoice.amountDue > 0 && selectedInvoice.status.toUpperCase() !== 'CANCELLED' && (
                 <button
                   onClick={() => setIsPayModalOpen(true)}
                   className="px-5 py-2.5 bg-[#0e1013] text-white rounded-full font-bold hover:bg-neutral-800 flex items-center space-x-1.5"
@@ -264,7 +300,8 @@ export const CustomerMyInvoices: React.FC = () => {
             </button>
             <button
               type="submit"
-              className="px-5 py-2.5 rounded-full bg-[#0e1013] text-white font-bold hover:bg-neutral-800"
+              disabled={payMutation.isPending}
+              className="px-5 py-2.5 rounded-full bg-[#0e1013] text-white font-bold hover:bg-neutral-800 disabled:opacity-50"
             >
               Authorize Payment of ${selectedInvoice?.amountDue.toFixed(2)}
             </button>
@@ -274,4 +311,3 @@ export const CustomerMyInvoices: React.FC = () => {
     </div>
   );
 };
-

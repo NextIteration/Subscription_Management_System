@@ -20,7 +20,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, className = ''
     styles = 'bg-[#fef3c7] text-[#92400e] border border-[#fde68a]';
   } else if (['quotation'].includes(norm)) {
     styles = 'bg-[#ede9fe] text-[#5b21b6] border border-[#ddd6fe]';
-  } else if (['draft', 'inactive', 'archived', 'closed'].includes(norm)) {
+  } else if (['draft', 'inactive', 'archived', 'closed', 'cancelled'].includes(norm)) {
     styles = 'bg-[#e2e8f0] text-[#475569] border border-[#cbd5e1]';
   }
 
@@ -33,4 +33,3 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, className = ''
     </span>
   );
 };
-
