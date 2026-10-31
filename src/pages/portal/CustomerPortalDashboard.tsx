@@ -1,25 +1,31 @@
 import React from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Header } from '../../components/layout/Header';
 import { MetricCard, DarkStatusCard } from '../../components/ui/StatCard';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
-import { RefreshCw, Receipt, CreditCard, Shield, Clock, ExternalLink } from 'lucide-react';
+import { RefreshCw, Receipt, CreditCard } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import * as portalApi from '../../api/portal.api';
 
 export const CustomerPortalDashboard: React.FC = () => {
   const { currentUser } = useAuth();
-  const { subscriptions, invoices, payments } = useApp();
+  const { subscriptions, invoices: fallbackInvoices } = useApp();
   const navigate = useNavigate();
 
   // Enforce customer scoping: customer only accesses their own records
   const customerId = currentUser?.customerId || 'cust-1';
   const mySubs = subscriptions.filter((s) => s.customerId === customerId);
-  const myInvoices = invoices.filter((i) => i.customerId === customerId);
-  const myPayments = payments.filter((p) => p.customerId === customerId);
+
+  // Query customer invoices
+  const { data: myInvoices = fallbackInvoices.filter((i) => i.customerId === customerId) } = useQuery({
+    queryKey: ['portal-invoices', customerId],
+    queryFn: () => portalApi.fetchPortalInvoices(customerId),
+  });
 
   const activeSubsCount = mySubs.filter((s) => s.status === 'ACTIVE').length;
-  const unpaidInvoices = myInvoices.filter((i) => i.status === 'issued' || i.status === 'overdue');
+  const unpaidInvoices = myInvoices.filter((i) => i.amountDue > 0 && i.status.toUpperCase() !== 'CANCELLED');
   const totalDue = unpaidInvoices.reduce((sum, i) => sum + i.amountDue, 0);
 
   return (
@@ -87,7 +93,7 @@ export const CustomerPortalDashboard: React.FC = () => {
                     </div>
                     <h4 className="font-bold text-sm text-[#0e1013] mt-1">{sub.planName}</h4>
                     <p className="text-xs text-[#526071]">
-                      Billing: <span className="uppercase font-semibold">{sub.billingFrequency}</span> • Renews: {sub.nextBillingDate}
+                      Billing: <span className="uppercase font-semibold">{sub.billingFrequency}</span> • Renews: {sub.nextBillingDate?.split('T')[0] || sub.nextBillingDate}
                     </p>
                   </div>
 
@@ -133,7 +139,7 @@ export const CustomerPortalDashboard: React.FC = () => {
                       </span>
                       <StatusBadge status={inv.status} />
                     </div>
-                    <span className="text-[11px] text-[#526071]">Due Date: {inv.dueDate}</span>
+                    <span className="text-[11px] text-[#526071]">Due Date: {inv.dueDate?.split('T')[0] || inv.dueDate}</span>
                   </div>
 
                   <div className="text-right">
@@ -188,4 +194,3 @@ export const CustomerPortalDashboard: React.FC = () => {
     </div>
   );
 };
-

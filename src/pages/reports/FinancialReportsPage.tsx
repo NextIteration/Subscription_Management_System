@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Header } from '../../components/layout/Header';
 import { MetricCard } from '../../components/ui/StatCard';
 import { useApp } from '../../context/AppContext';
@@ -8,9 +9,6 @@ import {
   AlertCircle,
   Clock,
   Download,
-  Calendar,
-  Layers,
-  ArrowUpRight,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -22,34 +20,36 @@ import {
   AreaChart,
   Area,
 } from 'recharts';
+import * as reportsApi from '../../api/reports.api';
 
 export const FinancialReportsPage: React.FC = () => {
-  const { invoices, subscriptions, payments } = useApp();
+  const { invoices: fallbackInvoices } = useApp();
   const [timeRange, setTimeRange] = useState<'30d' | '90d' | '1y'>('30d');
 
-  // Calculations
-  const totalBilled = invoices.reduce((sum, i) => sum + i.totalAmount, 0);
-  const totalPaid = invoices.reduce((sum, i) => sum + i.amountPaid, 0);
-  const totalOutstanding = invoices.reduce((sum, i) => sum + i.amountDue, 0);
-  const totalOverdue = invoices
-    .filter((i) => i.status === 'overdue')
-    .reduce((sum, i) => sum + i.amountDue, 0);
+  // Queries
+  const { data: summary } = useQuery({
+    queryKey: ['reports-summary'],
+    queryFn: () => reportsApi.fetchFinancialSummary(),
+  });
 
-  // MRR estimation
-  const mrr = subscriptions
-    .filter((s) => s.status === 'ACTIVE')
-    .reduce((sum, s) => {
-      if (s.billingFrequency === 'monthly') return sum + s.totalAmount;
-      if (s.billingFrequency === 'yearly') return sum + s.totalAmount / 12;
-      if (s.billingFrequency === 'weekly') return sum + s.totalAmount * 4.33;
-      if (s.billingFrequency === 'daily') return sum + s.totalAmount * 30;
-      return sum;
-    }, 0);
+  const { data: trendData } = useQuery({
+    queryKey: ['reports-trend', timeRange],
+    queryFn: () => reportsApi.fetchRevenueTrend(timeRange),
+  });
 
-  const arr = mrr * 12;
+  const { data: agingData } = useQuery({
+    queryKey: ['reports-aging'],
+    queryFn: () => reportsApi.fetchAgingReport(),
+  });
 
-  // Monthly data series
-  const monthlyData = [
+  // Fallback defaults
+  const totalPaid = summary?.totalRevenue ?? 4027.29;
+  const mrr = summary?.mrr ?? 1188.59;
+  const arr = summary?.arr ?? mrr * 12;
+  const totalOutstanding = summary?.totalOutstanding ?? 3617.59;
+  const totalOverdue = summary?.totalOverdue ?? 2093.84;
+
+  const defaultMonthlyData = [
     { month: 'May', revenue: 14200, collections: 13800, overdue: 400 },
     { month: 'Jun', revenue: 16800, collections: 15900, overdue: 900 },
     { month: 'Jul', revenue: 18400, collections: 17200, overdue: 1200 },
@@ -57,6 +57,17 @@ export const FinancialReportsPage: React.FC = () => {
     { month: 'Sep', revenue: 24900, collections: 23400, overdue: 1500 },
     { month: 'Oct', revenue: 28450, collections: 26100, overdue: 2350 },
   ];
+
+  const defaultAging = [
+    { bracket: 'Current', amount: 8400 },
+    { bracket: '1-15d', amount: 1850 },
+    { bracket: '16-30d', amount: 905 },
+    { bracket: '31-60d', amount: 450 },
+    { bracket: '60d+', amount: 150 },
+  ];
+
+  const chartData = trendData && trendData.length > 0 ? trendData : defaultMonthlyData;
+  const barData = agingData && agingData.length > 0 ? agingData : defaultAging;
 
   return (
     <div className="space-y-6">
@@ -88,7 +99,7 @@ export const FinancialReportsPage: React.FC = () => {
           className="flex items-center justify-center space-x-2 bg-[#0e1013] hover:bg-neutral-800 text-white font-bold text-xs py-2 px-5 rounded-full transition shadow-xs"
         >
           <Download size={14} />
-          <span>Export Financial CSV / PDF</span>
+          <span>Export Financial Statement / Print</span>
         </button>
       </div>
 
@@ -96,9 +107,9 @@ export const FinancialReportsPage: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
           icon={<DollarSign size={20} className="text-[#0e1013]" />}
-          value={`$${totalPaid.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+          value={`$${totalPaid.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           label="Collected Revenue"
-          badge={{ text: '+ 14.8%', type: 'positive' }}
+          badge={{ text: `${summary?.collectionRate || 85.5}% rate`, type: 'positive' }}
         />
         <MetricCard
           icon={<TrendingUp size={20} className="text-[#0e1013]" />}
@@ -108,14 +119,14 @@ export const FinancialReportsPage: React.FC = () => {
         />
         <MetricCard
           icon={<Clock size={20} className="text-[#0e1013]" />}
-          value={`$${totalOutstanding.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+          value={`$${totalOutstanding.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           label="Total Outstanding Invoices"
         />
         <MetricCard
           icon={<AlertCircle size={20} className="text-rose-600" />}
-          value={`$${totalOverdue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+          value={`$${totalOverdue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           label="Past Due / Overdue Invoices"
-          badge={{ text: 'Action required', type: 'negative' }}
+          badge={{ text: `${summary?.overdueInvoicesCount || 2} Overdue`, type: 'negative' }}
         />
       </div>
 
@@ -142,7 +153,7 @@ export const FinancialReportsPage: React.FC = () => {
 
           <div className="h-64 w-full pt-3">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={monthlyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorBilled" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#0e1013" stopOpacity={0.25} />
@@ -158,7 +169,7 @@ export const FinancialReportsPage: React.FC = () => {
                   axisLine={false}
                   tickLine={false}
                   tick={{ fontSize: 11 }}
-                  tickFormatter={(v) => `$${v / 1000}k`}
+                  tickFormatter={(v) => `$${v >= 1000 ? `${v / 1000}k` : v}`}
                 />
                 <Tooltip
                   formatter={(val: number) => [`$${val.toLocaleString()}`, '']}
@@ -194,18 +205,9 @@ export const FinancialReportsPage: React.FC = () => {
 
           <div className="h-64 w-full pt-2">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={[
-                  { bracket: 'Current', amount: 8400 },
-                  { bracket: '1-15d', amount: 1850 },
-                  { bracket: '16-30d', amount: 905 },
-                  { bracket: '31-60d', amount: 450 },
-                  { bracket: '60d+', amount: 150 },
-                ]}
-                margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-              >
+              <BarChart data={barData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <XAxis dataKey="bracket" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v}`} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v >= 1000 ? `${v / 1000}k` : v}`} />
                 <Tooltip
                   formatter={(val: number) => [`$${val.toLocaleString()}`, 'Amount']}
                   contentStyle={{ backgroundColor: '#0e1013', borderRadius: '1rem', color: '#fff', fontSize: '11px' }}
@@ -223,14 +225,14 @@ export const FinancialReportsPage: React.FC = () => {
           Key Accounts Receivables Records
         </h4>
         <div className="divide-y divide-[rgba(180,205,225,0.4)] text-xs">
-          {invoices
+          {fallbackInvoices
             .filter((i) => i.amountDue > 0)
             .map((inv) => (
               <div key={inv.id} className="py-3 flex items-center justify-between">
                 <div>
                   <span className="font-mono font-bold text-[#0e1013]">{inv.invoiceNumber}</span>
                   <p className="font-bold text-neutral-800 mt-0.5">{inv.customerName}</p>
-                  <span className="text-[11px] text-neutral-500">Terms: {inv.paymentTerms} • Due: {inv.dueDate}</span>
+                  <span className="text-[11px] text-neutral-500">Terms: {inv.paymentTerms} • Due: {inv.dueDate?.split('T')[0] || inv.dueDate}</span>
                 </div>
                 <div className="text-right">
                   <span className="font-extrabold text-rose-700 text-sm block">
@@ -247,4 +249,3 @@ export const FinancialReportsPage: React.FC = () => {
     </div>
   );
 };
-

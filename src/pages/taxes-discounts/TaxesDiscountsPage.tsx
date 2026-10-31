@@ -1,17 +1,70 @@
 import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Header } from '../../components/layout/Header';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { Modal } from '../../components/ui/Modal';
 import { useApp } from '../../context/AppContext';
 import { TaxRule, DiscountRule } from '../../types';
 import { Percent, Tag, Plus, Edit2, CheckCircle2, ShieldCheck, Calendar, DollarSign } from 'lucide-react';
+import * as taxApi from '../../api/tax.api';
+import * as discountApi from '../../api/discount.api';
 
 export const TaxesDiscountsPage: React.FC = () => {
-  const { taxRules, addTaxRule, updateTaxRule, discountRules, addDiscountRule, updateDiscountRule } =
-    useApp();
+  const queryClient = useQueryClient();
+  const { showToast, taxRules: fallbackTaxRules, discountRules: fallbackDiscountRules } = useApp();
   const [activeTab, setActiveTab] = useState<'taxes' | 'discounts'>('taxes');
 
-  // Tax Modal
+  // Queries
+  const { data: taxRules = fallbackTaxRules } = useQuery({
+    queryKey: ['tax-rules'],
+    queryFn: taxApi.fetchTaxRules,
+    placeholderData: fallbackTaxRules,
+  });
+
+  const { data: discountRules = fallbackDiscountRules } = useQuery({
+    queryKey: ['discount-rules'],
+    queryFn: discountApi.fetchDiscountRules,
+    placeholderData: fallbackDiscountRules,
+  });
+
+  // Mutations
+  const createTaxMutation = useMutation({
+    mutationFn: taxApi.createTaxRule,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tax-rules'] });
+      showToast('Tax rule created successfully');
+    },
+    onError: (err: any) => showToast(err.message || 'Failed to create tax rule', 'error'),
+  });
+
+  const updateTaxMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<TaxRule> }) => taxApi.updateTaxRule(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tax-rules'] });
+      showToast('Tax rule updated successfully');
+    },
+    onError: (err: any) => showToast(err.message || 'Failed to update tax rule', 'error'),
+  });
+
+  const createDiscountMutation = useMutation({
+    mutationFn: discountApi.createDiscountRule,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['discount-rules'] });
+      showToast('Discount rule created successfully');
+    },
+    onError: (err: any) => showToast(err.message || 'Failed to create discount rule', 'error'),
+  });
+
+  const updateDiscountMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<DiscountRule> }) => discountApi.updateDiscountRule(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['discount-rules'] });
+      showToast('Discount rule updated successfully');
+    },
+    onError: (err: any) => showToast(err.message || 'Failed to update discount rule', 'error'),
+  });
+
+  // Tax Modal State
   const [isTaxModalOpen, setIsTaxModalOpen] = useState(false);
   const [editingTax, setEditingTax] = useState<TaxRule | null>(null);
   const [taxName, setTaxName] = useState('');
@@ -22,7 +75,7 @@ export const TaxesDiscountsPage: React.FC = () => {
   const [taxDesc, setTaxDesc] = useState('');
   const [taxIsDefault, setTaxIsDefault] = useState(false);
 
-  // Discount Modal
+  // Discount Modal State
   const [isDiscountModalOpen, setIsDiscountModalOpen] = useState(false);
   const [editingDiscount, setEditingDiscount] = useState<DiscountRule | null>(null);
   const [discCode, setDiscCode] = useState('');
@@ -58,20 +111,23 @@ export const TaxesDiscountsPage: React.FC = () => {
     setIsTaxModalOpen(true);
   };
 
-  const handleSubmitTax = (e: React.FormEvent) => {
+  const handleSubmitTax = async (e: React.FormEvent) => {
     e.preventDefault();
     if (editingTax) {
-      updateTaxRule(editingTax.id, {
-        name: taxName,
-        code: taxCode,
-        ratePercentage: Number(taxRate),
-        country: taxCountry,
-        state: taxState,
-        description: taxDesc,
-        isDefault: taxIsDefault,
+      await updateTaxMutation.mutateAsync({
+        id: editingTax.id,
+        data: {
+          name: taxName,
+          code: taxCode,
+          ratePercentage: Number(taxRate),
+          country: taxCountry,
+          state: taxState,
+          description: taxDesc,
+          isDefault: taxIsDefault,
+        },
       });
     } else {
-      addTaxRule({
+      await createTaxMutation.mutateAsync({
         name: taxName,
         code: taxCode,
         ratePercentage: Number(taxRate),
@@ -105,27 +161,30 @@ export const TaxesDiscountsPage: React.FC = () => {
     setDiscType(d.type);
     setDiscValue(d.value);
     setDiscMinOrder(d.minOrderAmount);
-    setDiscValidFrom(d.validFrom);
-    setDiscValidUntil(d.validUntil);
+    setDiscValidFrom(d.validFrom?.split('T')[0] || d.validFrom);
+    setDiscValidUntil(d.validUntil?.split('T')[0] || d.validUntil);
     setDiscMaxUses(d.maxUses);
     setIsDiscountModalOpen(true);
   };
 
-  const handleSubmitDiscount = (e: React.FormEvent) => {
+  const handleSubmitDiscount = async (e: React.FormEvent) => {
     e.preventDefault();
     if (editingDiscount) {
-      updateDiscountRule(editingDiscount.id, {
-        code: discCode.toUpperCase(),
-        description: discDesc,
-        type: discType,
-        value: Number(discValue),
-        minOrderAmount: Number(discMinOrder),
-        validFrom: discValidFrom,
-        validUntil: discValidUntil,
-        maxUses: Number(discMaxUses),
+      await updateDiscountMutation.mutateAsync({
+        id: editingDiscount.id,
+        data: {
+          code: discCode.toUpperCase(),
+          description: discDesc,
+          type: discType,
+          value: Number(discValue),
+          minOrderAmount: Number(discMinOrder),
+          validFrom: discValidFrom,
+          validUntil: discValidUntil,
+          maxUses: Number(discMaxUses),
+        },
       });
     } else {
-      addDiscountRule({
+      await createDiscountMutation.mutateAsync({
         code: discCode.toUpperCase(),
         description: discDesc,
         type: discType,
@@ -135,7 +194,6 @@ export const TaxesDiscountsPage: React.FC = () => {
         validUntil: discValidUntil,
         maxUses: Number(discMaxUses),
         status: 'active',
-        applicablePlanIds: ['plan-1', 'plan-2'],
       });
     }
     setIsDiscountModalOpen(false);
@@ -284,15 +342,15 @@ export const TaxesDiscountsPage: React.FC = () => {
                   <div className="w-full bg-neutral-200 h-1.5 rounded-full overflow-hidden">
                     <div
                       className="bg-[#0e1013] h-full"
-                      style={{ width: `${(disc.usedCount / disc.maxUses) * 100}%` }}
+                      style={{ width: `${Math.min(100, (disc.usedCount / disc.maxUses) * 100)}%` }}
                     ></div>
                   </div>
                 </div>
               </div>
 
               <div className="mt-4 pt-3 border-t border-[rgba(160,190,215,0.4)] text-[10px] text-neutral-400 flex justify-between">
-                <span>Valid: {disc.validFrom}</span>
-                <span>Until: {disc.validUntil}</span>
+                <span>Valid: {disc.validFrom?.split('T')[0] || disc.validFrom}</span>
+                <span>Until: {disc.validUntil?.split('T')[0] || disc.validUntil}</span>
               </div>
             </div>
           ))}
@@ -394,7 +452,8 @@ export const TaxesDiscountsPage: React.FC = () => {
             </button>
             <button
               type="submit"
-              className="px-5 py-2 rounded-full bg-[#0e1013] text-white font-bold hover:bg-neutral-800"
+              disabled={createTaxMutation.isPending || updateTaxMutation.isPending}
+              className="px-5 py-2 rounded-full bg-[#0e1013] text-white font-bold hover:bg-neutral-800 disabled:opacity-50"
             >
               Save Rule
             </button>
@@ -513,7 +572,8 @@ export const TaxesDiscountsPage: React.FC = () => {
             </button>
             <button
               type="submit"
-              className="px-5 py-2 rounded-full bg-[#0e1013] text-white font-bold hover:bg-neutral-800"
+              disabled={createDiscountMutation.isPending || updateDiscountMutation.isPending}
+              className="px-5 py-2 rounded-full bg-[#0e1013] text-white font-bold hover:bg-neutral-800 disabled:opacity-50"
             >
               Save Discount Rule
             </button>
@@ -523,4 +583,3 @@ export const TaxesDiscountsPage: React.FC = () => {
     </div>
   );
 };
-

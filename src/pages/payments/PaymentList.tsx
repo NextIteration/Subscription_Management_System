@@ -1,43 +1,77 @@
 import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Header } from '../../components/layout/Header';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { Modal } from '../../components/ui/Modal';
 import { useApp } from '../../context/AppContext';
 import { Payment } from '../../types';
-import { CreditCard, Search, Plus, CheckCircle, ExternalLink, Building2 } from 'lucide-react';
+import { Search, Plus } from 'lucide-react';
+import * as paymentApi from '../../api/payment.api';
+import * as invoiceApi from '../../api/invoice.api';
 
 export const PaymentList: React.FC = () => {
-  const { payments, invoices, recordPayment } = useApp();
+  const queryClient = useQueryClient();
+  const { payments: fallbackPayments, invoices: fallbackInvoices, showToast } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState(invoices[0]?.id || '');
+  const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
+
+  // Queries
+  const { data: paymentData } = useQuery({
+    queryKey: ['payments', searchTerm],
+    queryFn: () => paymentApi.fetchPayments({ search: searchTerm }),
+  });
+
+  const { data: invoiceData } = useQuery({
+    queryKey: ['invoices'],
+    queryFn: () => invoiceApi.fetchInvoices(),
+  });
+
+  const payments = paymentData?.items || fallbackPayments;
+  const invoices = invoiceData?.items || fallbackInvoices;
+
+  // Filter invoices that have an outstanding balance
+  const unpaidInvoices = invoices.filter((i) => i.amountDue > 0 && i.status.toUpperCase() !== 'CANCELLED');
+
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState(unpaidInvoices[0]?.id || invoices[0]?.id || '');
   const [amount, setAmount] = useState<number>(500);
   const [paymentMethod, setPaymentMethod] = useState<Payment['paymentMethod']>('Credit Card');
   const [reference, setReference] = useState(`REF-${Math.floor(100000 + Math.random() * 900000)}`);
-  const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
+
+  // Mutation
+  const recordPaymentMutation = useMutation({
+    mutationFn: paymentApi.recordPayment,
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['payments'] });
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+      showToast(`Payment ${result.payment.paymentNumber} of $${result.payment.amount.toFixed(2)} recorded`);
+      setIsRecordModalOpen(false);
+    },
+    onError: (err: any) => showToast(err.message || 'Failed to record payment', 'error'),
+  });
 
   const filteredPayments = payments.filter(
     (p) =>
       p.paymentNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.invoiceNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.invoiceNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (p as any).invoice?.invoiceNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.customerName.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleRecordPayment = (e: React.FormEvent) => {
+  const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     const inv = invoices.find((i) => i.id === selectedInvoiceId) || invoices[0];
-    recordPayment({
+    if (!inv) return;
+
+    await recordPaymentMutation.mutateAsync({
       invoiceId: inv.id,
-      invoiceNumber: inv.invoiceNumber,
-      customerId: inv.customerId,
-      customerName: inv.customerName,
       amount: Number(amount),
       paymentMethod,
-      paymentDate: new Date().toISOString().split('T')[0],
       reference,
-      status: 'completed',
+      paymentDate: new Date().toISOString().split('T')[0],
+      notes: 'Recorded via payment reconciliation module',
     });
-    setIsRecordModalOpen(false);
   };
 
   return (
@@ -63,6 +97,10 @@ export const PaymentList: React.FC = () => {
         <button
           onClick={() => {
             setReference(`REF-${Math.floor(100000 + Math.random() * 900000)}`);
+            if (unpaidInvoices.length > 0) {
+              setSelectedInvoiceId(unpaidInvoices[0].id);
+              setAmount(unpaidInvoices[0].amountDue);
+            }
             setIsRecordModalOpen(true);
           }}
           className="flex items-center justify-center space-x-2 bg-[#0e1013] hover:bg-neutral-800 text-white font-bold text-xs py-2.5 px-5 rounded-full transition shadow-xs"
@@ -99,7 +137,7 @@ export const PaymentList: React.FC = () => {
                   </td>
 
                   <td className="py-3.5 px-3 font-mono font-bold text-sky-900">
-                    {pay.invoiceNumber}
+                    {pay.invoiceNumber || (pay as any).invoice?.invoiceNumber}
                   </td>
 
                   <td className="py-3.5 px-3 font-bold text-[#0e1013]">{pay.customerName}</td>
@@ -110,7 +148,9 @@ export const PaymentList: React.FC = () => {
                     </span>
                   </td>
 
-                  <td className="py-3.5 px-3 text-neutral-600 font-medium">{pay.paymentDate}</td>
+                  <td className="py-3.5 px-3 text-neutral-600 font-medium">
+                    {pay.paymentDate?.split('T')[0] || pay.paymentDate}
+                  </td>
 
                   <td className="py-3.5 px-3">
                     <StatusBadge status={pay.status} />
@@ -132,7 +172,7 @@ export const PaymentList: React.FC = () => {
           isOpen={!!selectedPayment}
           onClose={() => setSelectedPayment(null)}
           title={`Payment Receipt ${selectedPayment.paymentNumber}`}
-          subtitle={`Settlement applied towards ${selectedPayment.invoiceNumber}`}
+          subtitle={`Settlement applied towards ${selectedPayment.invoiceNumber || (selectedPayment as any).invoice?.invoiceNumber}`}
         >
           <div className="space-y-4 text-xs">
             <div className="bg-white/80 p-4 rounded-2xl border border-[rgba(180,205,225,0.4)] flex items-center justify-between">
@@ -158,7 +198,9 @@ export const PaymentList: React.FC = () => {
               </div>
               <div>
                 <span className="text-neutral-500 block">Processed On:</span>
-                <span className="font-bold text-[#0e1013]">{selectedPayment.paymentDate}</span>
+                <span className="font-bold text-[#0e1013]">
+                  {selectedPayment.paymentDate?.split('T')[0] || selectedPayment.paymentDate}
+                </span>
               </div>
               <div>
                 <span className="text-neutral-500 block">Transaction Reference:</span>
@@ -194,7 +236,7 @@ export const PaymentList: React.FC = () => {
               }}
               className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-[rgba(160,190,215,0.5)] outline-none text-xs"
             >
-              {invoices.map((inv) => (
+              {(unpaidInvoices.length > 0 ? unpaidInvoices : invoices).map((inv) => (
                 <option key={inv.id} value={inv.id}>
                   {inv.invoiceNumber} — {inv.customerName} (Due: ${inv.amountDue.toFixed(2)})
                 </option>
@@ -251,7 +293,8 @@ export const PaymentList: React.FC = () => {
             </button>
             <button
               type="submit"
-              className="px-5 py-2 rounded-full bg-[#0e1013] text-white font-bold hover:bg-neutral-800"
+              disabled={recordPaymentMutation.isPending}
+              className="px-5 py-2 rounded-full bg-[#0e1013] text-white font-bold hover:bg-neutral-800 disabled:opacity-50"
             >
               Submit Settlement
             </button>
@@ -261,4 +304,3 @@ export const PaymentList: React.FC = () => {
     </div>
   );
 };
-

@@ -1,29 +1,99 @@
 import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Header } from '../../components/layout/Header';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { Modal } from '../../components/ui/Modal';
 import { useApp } from '../../context/AppContext';
 import { Invoice } from '../../types';
 import {
-  Receipt,
   Search,
   Printer,
   DollarSign,
-  Calendar,
-  AlertTriangle,
-  CheckCircle,
   FileText,
+  Download,
+  CheckCircle,
+  XCircle,
   Send,
-  CreditCard,
-  Building2,
   Plus,
 } from 'lucide-react';
+import * as invoiceApi from '../../api/invoice.api';
+import * as paymentApi from '../../api/payment.api';
 
 export const InvoiceList: React.FC = () => {
-  const { invoices, updateInvoiceStatus, recordPayment, customers, subscriptions, addInvoice } = useApp();
+  const queryClient = useQueryClient();
+  const { invoices: fallbackInvoices, customers, subscriptions, showToast } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+
+  // Queries
+  const { data: invoiceData } = useQuery({
+    queryKey: ['invoices', statusFilter, searchTerm],
+    queryFn: () => invoiceApi.fetchInvoices({ status: statusFilter, search: searchTerm }),
+  });
+
+  const invoices = invoiceData?.items || fallbackInvoices;
+
+  // Mutations
+  const createInvoiceMutation = useMutation({
+    mutationFn: invoiceApi.createInvoice,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+      showToast('Invoice created successfully');
+    },
+    onError: (err: any) => showToast(err.message || 'Failed to create invoice', 'error'),
+  });
+
+  const confirmInvoiceMutation = useMutation({
+    mutationFn: invoiceApi.confirmInvoice,
+    onSuccess: (updated) => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      showToast(`Invoice ${updated.invoiceNumber} confirmed`);
+      if (selectedInvoice?.id === updated.id) {
+        setSelectedInvoice((prev: any) => (prev ? { ...prev, status: 'CONFIRMED' } : null));
+      }
+    },
+    onError: (err: any) => showToast(err.message || 'Failed to confirm invoice', 'error'),
+  });
+
+  const cancelInvoiceMutation = useMutation({
+    mutationFn: invoiceApi.cancelInvoice,
+    onSuccess: (updated) => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      showToast(`Invoice ${updated.invoiceNumber} cancelled`);
+      if (selectedInvoice?.id === updated.id) {
+        setSelectedInvoice((prev: any) => (prev ? { ...prev, status: 'CANCELLED' } : null));
+      }
+    },
+    onError: (err: any) => showToast(err.message || 'Failed to cancel invoice', 'error'),
+  });
+
+  const sendInvoiceMutation = useMutation({
+    mutationFn: invoiceApi.sendInvoice,
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      showToast(`Invoice ${result.invoice.invoiceNumber} emailed to ${result.emailResult.to}`);
+      if (selectedInvoice?.id === result.invoice.id) {
+        setSelectedInvoice((prev: any) => (prev ? { ...prev, ...result.invoice } : null));
+      }
+    },
+    onError: (err: any) => showToast(err.message || 'Failed to email invoice', 'error'),
+  });
+
+  const recordPaymentMutation = useMutation({
+    mutationFn: paymentApi.recordPayment,
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['payments'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+      showToast(`Payment ${result.payment.paymentNumber} recorded successfully`);
+      if (selectedInvoice?.id === result.invoice.id) {
+        setSelectedInvoice((prev: any) => (prev ? { ...prev, ...result.invoice } : null));
+      }
+    },
+    onError: (err: any) => showToast(err.message || 'Failed to record payment', 'error'),
+  });
 
   // Record Payment Modal State
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -46,7 +116,7 @@ export const InvoiceList: React.FC = () => {
       i.invoiceNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
       i.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (i.subscriptionNumber && i.subscriptionNumber.toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchesStatus = statusFilter === 'all' || i.status === statusFilter;
+    const matchesStatus = statusFilter === 'all' || i.status.toLowerCase() === statusFilter.toLowerCase();
     return matchesSearch && matchesStatus;
   });
 
@@ -57,65 +127,43 @@ export const InvoiceList: React.FC = () => {
     setIsPaymentModalOpen(true);
   };
 
-  const handleConfirmPayment = (e: React.FormEvent) => {
+  const handleConfirmPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedInvoice) return;
 
-    recordPayment({
+    await recordPaymentMutation.mutateAsync({
       invoiceId: selectedInvoice.id,
-      invoiceNumber: selectedInvoice.invoiceNumber,
-      customerId: selectedInvoice.customerId,
-      customerName: selectedInvoice.customerName,
       amount: Number(payAmount),
       paymentMethod: payMethod,
       paymentDate: new Date().toISOString().split('T')[0],
       reference: payRef,
-      status: 'completed',
       notes: `Recorded via invoice billing management console.`,
     });
 
     setIsPaymentModalOpen(false);
-    // Refresh modal details
-    const updated = invoices.find((i) => i.id === selectedInvoice.id);
-    if (updated) setSelectedInvoice(updated);
   };
 
-  const handleCreateInvoice = (e: React.FormEvent) => {
+  const handleCreateInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
     const cust = customers.find((c) => c.id === newCustId) || customers[0];
     const sub = subscriptions.find((s) => s.id === newSubId);
 
-    const tax = (newAmount * 8.25) / 100;
-    const total = newAmount + tax;
-
-    addInvoice({
-      subscriptionId: sub?.id,
-      subscriptionNumber: sub?.subscriptionNumber,
+    await createInvoiceMutation.mutateAsync({
       customerId: cust.id,
-      customerName: cust.name,
-      customerEmail: cust.email,
+      subscriptionId: sub?.id,
       issueDate: new Date().toISOString().split('T')[0],
       dueDate: newDueDate,
-      status: 'issued',
+      paymentTerms: newTerms,
+      notes: 'Generated via invoice bill generator.',
       lines: [
         {
-          id: `il-${Date.now()}`,
           productId: 'prod-1',
           productName: sub?.planName || 'Platform Subscription License',
           quantity: 1,
           unitPrice: newAmount,
           taxRate: 8.25,
-          lineTotal: newAmount,
         },
       ],
-      subtotal: newAmount,
-      taxAmount: tax,
-      discountAmount: 0,
-      totalAmount: total,
-      amountPaid: 0,
-      amountDue: total,
-      paymentTerms: newTerms,
-      notes: 'Generated via ad-hoc invoice bill generator.',
     });
 
     setIsCreateOpen(false);
@@ -156,9 +204,10 @@ export const InvoiceList: React.FC = () => {
           >
             <option value="all">All Invoices</option>
             <option value="paid">Paid</option>
-            <option value="issued">Issued / Due</option>
+            <option value="confirmed">Confirmed / Due</option>
             <option value="overdue">Overdue</option>
             <option value="draft">Draft</option>
+            <option value="cancelled">Cancelled</option>
           </select>
         </div>
 
@@ -205,14 +254,16 @@ export const InvoiceList: React.FC = () => {
                   </td>
 
                   <td className="py-3.5 px-3 font-mono text-[11px] text-[#0e1013]">
-                    {inv.subscriptionNumber || 'Ad-hoc invoice'}
+                    {inv.subscriptionNumber || (inv as any).subscription?.subscriptionNumber || 'Ad-hoc invoice'}
                   </td>
 
-                  <td className="py-3.5 px-3 text-neutral-600">{inv.issueDate}</td>
+                  <td className="py-3.5 px-3 text-neutral-600">
+                    {inv.issueDate?.split('T')[0] || inv.issueDate}
+                  </td>
 
                   <td className="py-3.5 px-3 font-medium">
-                    <span className={inv.status === 'overdue' ? 'text-rose-600 font-bold' : 'text-[#0e1013]'}>
-                      {inv.dueDate}
+                    <span className={inv.status.toLowerCase() === 'overdue' ? 'text-rose-600 font-bold' : 'text-[#0e1013]'}>
+                      {inv.dueDate?.split('T')[0] || inv.dueDate}
                     </span>
                   </td>
 
@@ -236,7 +287,29 @@ export const InvoiceList: React.FC = () => {
 
                   <td className="py-3.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-center space-x-1.5">
-                      {inv.amountDue > 0 && (
+                      {inv.status.toUpperCase() === 'DRAFT' && (
+                        <button
+                          onClick={() => confirmInvoiceMutation.mutate(inv.id)}
+                          className="px-2 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-[10px] font-bold flex items-center space-x-1"
+                          title="Confirm invoice"
+                        >
+                          <CheckCircle size={12} />
+                          <span>Confirm</span>
+                        </button>
+                      )}
+
+                      {inv.status.toUpperCase() !== 'CANCELLED' && (
+                        <button
+                          onClick={() => sendInvoiceMutation.mutate(inv.id)}
+                          disabled={sendInvoiceMutation.isPending}
+                          className="p-1.5 rounded-full hover:bg-white text-neutral-600 hover:text-sky-700 transition"
+                          title="Send invoice via email"
+                        >
+                          <Send size={14} />
+                        </button>
+                      )}
+
+                      {inv.amountDue > 0 && inv.status.toUpperCase() !== 'DRAFT' && inv.status.toUpperCase() !== 'CANCELLED' && (
                         <button
                           onClick={() => handleOpenPayment(inv)}
                           className="px-2.5 py-1 bg-[#0e1013] hover:bg-neutral-800 text-white rounded-lg text-[10px] font-bold flex items-center space-x-1 shadow-2xs"
@@ -315,16 +388,16 @@ export const InvoiceList: React.FC = () => {
               <div className="sm:text-right space-y-1">
                 <div>
                   <span className="text-neutral-400 mr-2">Issue Date:</span>
-                  <span className="font-bold">{selectedInvoice.issueDate}</span>
+                  <span className="font-bold">{selectedInvoice.issueDate?.split('T')[0] || selectedInvoice.issueDate}</span>
                 </div>
                 <div>
                   <span className="text-neutral-400 mr-2">Due Date:</span>
-                  <span className="font-bold text-rose-600">{selectedInvoice.dueDate}</span>
+                  <span className="font-bold text-rose-600">{selectedInvoice.dueDate?.split('T')[0] || selectedInvoice.dueDate}</span>
                 </div>
                 <div>
                   <span className="text-neutral-400 mr-2">Subscription Ref:</span>
                   <span className="font-mono font-bold">
-                    {selectedInvoice.subscriptionNumber || 'N/A'}
+                    {selectedInvoice.subscriptionNumber || (selectedInvoice as any).subscription?.subscriptionNumber || 'N/A'}
                   </span>
                 </div>
               </div>
@@ -342,7 +415,7 @@ export const InvoiceList: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
-                  {selectedInvoice.lines.map((l) => (
+                  {selectedInvoice.lines?.map((l) => (
                     <tr key={l.id}>
                       <td className="py-2.5 px-3 font-semibold">{l.productName}</td>
                       <td className="py-2.5 px-3 text-center font-medium">{l.quantity}</td>
@@ -364,11 +437,17 @@ export const InvoiceList: React.FC = () => {
                   <span className="font-mono font-bold">${selectedInvoice.subtotal.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-neutral-600">
-                  <span>Tax (CA/US):</span>
+                  <span>Tax:</span>
                   <span className="font-mono font-bold">${selectedInvoice.taxAmount.toFixed(2)}</span>
                 </div>
+                {selectedInvoice.discountAmount > 0 && (
+                  <div className="flex justify-between text-emerald-700 font-bold">
+                    <span>Discount:</span>
+                    <span className="font-mono">-${selectedInvoice.discountAmount.toFixed(2)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between border-t pt-2 text-sm font-extrabold text-[#0e1013]">
-                  <span>Total Due:</span>
+                  <span>Total:</span>
                   <span className="font-mono">${selectedInvoice.totalAmount.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-emerald-700 font-bold">
@@ -386,29 +465,73 @@ export const InvoiceList: React.FC = () => {
             {selectedInvoice.notes && (
               <div className="p-3 bg-neutral-50 rounded-xl text-neutral-600 text-xs">
                 <span className="font-bold block mb-0.5">Notes:</span>
-                <p>{selectedInvoice.notes}</p>
+                <p className="whitespace-pre-line">{selectedInvoice.notes}</p>
               </div>
             )}
 
             {/* Footer action buttons */}
-            <div className="flex items-center justify-between pt-4 border-t">
-              <button
-                onClick={handlePrint}
-                className="flex items-center space-x-1.5 px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-full font-bold text-xs transition"
-              >
-                <Printer size={14} />
-                <span>Print Invoice</span>
-              </button>
-
-              {selectedInvoice.amountDue > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t">
+              <div className="flex items-center space-x-2">
                 <button
-                  onClick={() => handleOpenPayment(selectedInvoice)}
-                  className="flex items-center space-x-1.5 px-5 py-2.5 bg-[#0e1013] hover:bg-neutral-800 text-white rounded-full font-bold text-xs transition shadow-sm"
+                  onClick={handlePrint}
+                  className="flex items-center space-x-1.5 px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-full font-bold text-xs transition"
                 >
-                  <DollarSign size={14} />
-                  <span>Record Payment</span>
+                  <Printer size={14} />
+                  <span>Print</span>
                 </button>
-              )}
+
+                <a
+                  href={invoiceApi.getInvoicePdfUrl(selectedInvoice.id)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center space-x-1.5 px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-full font-bold text-xs transition"
+                >
+                  <Download size={14} />
+                  <span>Download PDF</span>
+                </a>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                {selectedInvoice.status.toUpperCase() !== 'CANCELLED' && (
+                  <button
+                    onClick={() => sendInvoiceMutation.mutate(selectedInvoice.id)}
+                    disabled={sendInvoiceMutation.isPending}
+                    className="flex items-center space-x-1.5 px-4 py-2 bg-sky-700 hover:bg-sky-800 text-white rounded-full font-bold text-xs transition shadow-xs disabled:opacity-50"
+                  >
+                    <Send size={14} />
+                    <span>{sendInvoiceMutation.isPending ? 'Sending...' : 'Send Email'}</span>
+                  </button>
+                )}
+
+                {selectedInvoice.status.toUpperCase() === 'DRAFT' && (
+                  <>
+                    <button
+                      onClick={() => cancelInvoiceMutation.mutate(selectedInvoice.id)}
+                      className="flex items-center space-x-1.5 px-4 py-2 bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-full font-bold text-xs transition"
+                    >
+                      <XCircle size={14} />
+                      <span>Cancel Invoice</span>
+                    </button>
+                    <button
+                      onClick={() => confirmInvoiceMutation.mutate(selectedInvoice.id)}
+                      className="flex items-center space-x-1.5 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-full font-bold text-xs transition shadow-sm"
+                    >
+                      <CheckCircle size={14} />
+                      <span>Confirm Invoice</span>
+                    </button>
+                  </>
+                )}
+
+                {selectedInvoice.amountDue > 0 && selectedInvoice.status.toUpperCase() !== 'DRAFT' && selectedInvoice.status.toUpperCase() !== 'CANCELLED' && (
+                  <button
+                    onClick={() => handleOpenPayment(selectedInvoice)}
+                    className="flex items-center space-x-1.5 px-5 py-2.5 bg-[#0e1013] hover:bg-neutral-800 text-white rounded-full font-bold text-xs transition shadow-sm"
+                  >
+                    <DollarSign size={14} />
+                    <span>Record Payment</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </Modal>
@@ -472,7 +595,8 @@ export const InvoiceList: React.FC = () => {
             </button>
             <button
               type="submit"
-              className="px-5 py-2 rounded-full bg-[#0e1013] text-white font-bold hover:bg-neutral-800"
+              disabled={recordPaymentMutation.isPending}
+              className="px-5 py-2 rounded-full bg-[#0e1013] text-white font-bold hover:bg-neutral-800 disabled:opacity-50"
             >
               Confirm Payment
             </button>
@@ -568,7 +692,8 @@ export const InvoiceList: React.FC = () => {
             </button>
             <button
               type="submit"
-              className="px-5 py-2 rounded-full bg-[#0e1013] text-white font-bold hover:bg-neutral-800"
+              disabled={createInvoiceMutation.isPending}
+              className="px-5 py-2 rounded-full bg-[#0e1013] text-white font-bold hover:bg-neutral-800 disabled:opacity-50"
             >
               Issue Invoice
             </button>
@@ -578,4 +703,3 @@ export const InvoiceList: React.FC = () => {
     </div>
   );
 };
-
